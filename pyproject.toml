@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "autoclay"
+version = "0.1.0"
+description = "Python SDK and CLI for Clay's People Search API"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+
+[project.scripts]
+clay = "autoclay.cli:main"
