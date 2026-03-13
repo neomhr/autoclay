@@ -10,5 +10,8 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"
 
+[tool.setuptools.packages.find]
+include = ["autoclay*"]
+
 [project.scripts]
 clay = "autoclay.cli:main"
