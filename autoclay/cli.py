@@ -10,18 +10,30 @@ import argparse
 import csv
 import getpass
 import json
-import os
 import sys
 from datetime import datetime
-from pathlib import Path
+
+import subprocess
 
 from .auth import SessionManager
 from .client import ClayClient
+from .config import AUTOCLAY_DIR, CREDENTIALS_FILE, save_credentials
 from .exceptions import ClayAuthError
 from .models import SearchFilters
 from .search import PeopleSearch, KeywordExpander
 from .tables import TableManager
 from .output import write_csv, write_sqlite, write_json
+
+
+BANNER = r"""
+       █████  ██    ██ ████████  ██████   ██████ ██       █████  ██    ██
+      ██   ██ ██    ██    ██    ██    ██ ██      ██      ██   ██  ██  ██
+      ███████ ██    ██    ██    ██    ██ ██      ██      ███████   ████
+      ██   ██ ██    ██    ██    ██    ██ ██      ██      ██   ██    ██
+      ██   ██  ██████     ██     ██████   ██████ ███████ ██   ██    ██
+"""
+
+TAGLINE = "      Built by Neo Mohr"
 
 
 def _progress(msg):
@@ -45,8 +57,13 @@ def cmd_people_search(args):
     if not quiet:
         _progress("Clay People Search")
         _progress(f"  Mode: {args.mode}")
-        _progress(f"  Domains: {len(domains)} ({', '.join(domains[:3])}{'...' if len(domains) > 3 else ''})")
-        _progress(f"  Limit: {args.limit}")
+        if domains:
+            _progress(f"  Domains: {len(domains)} ({', '.join(domains[:3])}{'...' if len(domains) > 3 else ''})")
+        else:
+            _progress("  Domains: all (no filter)")
+        _progress(f"  Limit: {args.limit or 'plan cap'}")
+        if args.limit_per_company:
+            _progress(f"  Limit per company: {args.limit_per_company}")
 
     if args.mode == "full" and len(domains) > 1:
         # Full mode: one search per domain for best coverage
@@ -58,6 +75,7 @@ def cmd_people_search(args):
                 [domain],
                 filters=filters,
                 limit=args.limit,
+                limit_per_company=args.limit_per_company,
                 mode="full",
                 cleanup=args.cleanup,
                 on_progress=on_progress,
@@ -70,6 +88,7 @@ def cmd_people_search(args):
             domains,
             filters=filters,
             limit=args.limit,
+            limit_per_company=args.limit_per_company,
             mode=args.mode,
             cleanup=args.cleanup,
             on_progress=on_progress,
@@ -165,53 +184,12 @@ def cmd_keywords_expand(args):
 # Setup
 # ---------------------------------------------------------------------------
 
-def _env_path():
-    """Resolve .env path relative to CWD."""
-    return Path.cwd() / ".env"
-
-
-def _read_env(path):
-    """Read .env file into an ordered list of (key, value) tuples + raw lines."""
-    lines = []
-    if path.exists():
-        with open(path) as f:
-            lines = f.readlines()
-    return lines
-
-
-def _write_env_vars(path, updates):
-    """Write or update key=value pairs in .env, preserving other content."""
-    lines = _read_env(path)
-    keys_written = set()
-    new_lines = []
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            key = stripped.split("=", 1)[0]
-            if key in updates:
-                new_lines.append(f"{key}={updates[key]}\n")
-                keys_written.add(key)
-                continue
-        new_lines.append(line)
-
-    # Append any keys not yet in the file
-    for key, value in updates.items():
-        if key not in keys_written:
-            if new_lines and not new_lines[-1].endswith("\n"):
-                new_lines.append("\n")
-            new_lines.append(f"{key}={value}\n")
-
-    with open(path, "w") as f:
-        f.writelines(new_lines)
-
-
 def cmd_setup(args):
     """Interactive setup wizard."""
+    print(BANNER)
+    print(TAGLINE)
     print()
-    print("  +-----------------------------------+")
-    print("  |  Clay SDK Setup                   |")
-    print("  +-----------------------------------+")
+    print("  ─── Setup ───")
     print()
 
     # Step 1: Python version check
@@ -223,11 +201,16 @@ def cmd_setup(args):
         sys.exit(1)
 
     # Step 2: Check existing credentials
-    env_path = _env_path()
-    existing_email = os.environ.get("CLAY_EMAIL")
+    existing_email = None
+    if CREDENTIALS_FILE.exists():
+        try:
+            creds = json.loads(CREDENTIALS_FILE.read_text())
+            existing_email = creds.get("email")
+        except (json.JSONDecodeError, OSError):
+            pass
 
     if existing_email:
-        print(f"  Checking .env file... found existing credentials ({existing_email})")
+        print(f"  Found existing credentials ({existing_email})")
         print()
         overwrite = input("  Overwrite existing credentials? [y/N] ").strip().lower()
         if overwrite not in ("y", "yes"):
@@ -236,7 +219,7 @@ def cmd_setup(args):
             print()
             return
     else:
-        print(f"  Checking .env file... no credentials found")
+        print("  No existing credentials found")
 
     # Step 3: Prompt for credentials
     print()
@@ -257,9 +240,9 @@ def cmd_setup(args):
     print("  Authenticating...", end=" ", flush=True)
     session = SessionManager()
     try:
-        session.login(email, password)
+        detected_workspace_id = session.login(email, password)
     except ClayAuthError as e:
-        print(f"FAIL")
+        print("FAIL")
         print(f"\n  Error: {e}")
         print("  Credentials NOT saved.")
         sys.exit(1)
@@ -267,24 +250,93 @@ def cmd_setup(args):
     status = session.status()
     print(f"ok  Logged in (session expires in {status['expires_in']})")
 
-    # Step 5: Save to .env
-    print(f"  Saving credentials to .env...", end=" ", flush=True)
-    _write_env_vars(env_path, {
-        "CLAY_EMAIL": email,
-        "CLAY_PASSWORD": password,
-    })
+    # Step 5: Prompt for workspace ID
+    print()
+    print("  Workspace ID")
+    print("    Find it in your Clay URL: app.clay.com/workspaces/<WORKSPACE_ID>")
+    if detected_workspace_id:
+        print(f"    Detected from login: {detected_workspace_id}")
+    print()
+    try:
+        default_label = f" [{detected_workspace_id}]" if detected_workspace_id else ""
+        workspace_id = input(f"    Workspace ID{default_label}: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print("\n\n  Setup cancelled.")
+        sys.exit(1)
+
+    if not workspace_id:
+        if detected_workspace_id:
+            workspace_id = detected_workspace_id
+        else:
+            print("\n  Error: Workspace ID is required.")
+            sys.exit(1)
+
+    # Step 6: Save to ~/.autoclay/credentials.json
+    print()
+    print(f"  Saving credentials to {CREDENTIALS_FILE}...", end=" ", flush=True)
+    save_credentials(email, password, workspace_id)
     print("ok")
 
-    # Step 6: Success banner
+    # Step 7: Success banner
     print()
-    print("  +-----------------------------------+")
-    print("  |  Setup complete!                  |")
-    print("  |                                   |")
-    print("  |  Try it out:                      |")
-    print("  |    clay people search \\            |")
-    print("  |      --domains github.com         |")
-    print("  +-----------------------------------+")
+    print("  ─── Setup complete! ───")
     print()
+    print("  Credentials stored in ~/.autoclay/credentials.json")
+    print("  Session cached in ~/.autoclay/session.json")
+    print()
+    print("  Try it out:")
+    print("    clay people search --domains github.com")
+    print()
+
+
+# ---------------------------------------------------------------------------
+# Update
+# ---------------------------------------------------------------------------
+
+def _find_source_dir():
+    """Find the autoclay source directory.
+
+    Checks, in order:
+    1. ~/.autoclay/src/ (standard install location)
+    2. The directory containing this package (editable/dev install)
+    """
+    from pathlib import Path
+
+    standard = AUTOCLAY_DIR / "src"
+    if (standard / ".git").is_dir():
+        return standard
+
+    # Fallback: this file's parent's parent (repo root)
+    pkg_root = Path(__file__).resolve().parent.parent
+    if (pkg_root / ".git").is_dir():
+        return pkg_root
+
+    return None
+
+
+def cmd_update(args):
+    """Pull latest changes from git."""
+    src_dir = _find_source_dir()
+    if not src_dir:
+        print("Error: Cannot find autoclay source directory.", file=sys.stderr)
+        print("If you installed manually, cd into the repo and run: git pull", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Updating from {src_dir}...")
+    result = subprocess.run(
+        ["git", "-C", str(src_dir), "pull"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"git pull failed:\n{result.stderr}", file=sys.stderr)
+        sys.exit(1)
+
+    output = result.stdout.strip()
+    if output == "Already up to date.":
+        print("Already up to date.")
+    else:
+        print(output)
+        print("\nUpdated successfully. Changes are live (editable install).")
 
 
 # ---------------------------------------------------------------------------
@@ -304,8 +356,8 @@ def _load_domains(args):
                     if "." in val and not val.lower().startswith("domain"):
                         domains.append(val)
         return domains
-    print("ERROR: Provide --domains or --domains-file", file=sys.stderr)
-    sys.exit(1)
+    # No domains specified — search across all sources
+    return []
 
 
 def _split(val):
@@ -394,6 +446,12 @@ def _build_filters(args):
     if args.max_role_months is not None:
         kw["current_role_max_months"] = args.max_role_months
 
+    # Role date range
+    if args.role_range_start_month is not None:
+        kw["role_range_start_month"] = args.role_range_start_month
+    if args.role_range_end_month is not None:
+        kw["role_range_end_month"] = args.role_range_end_month
+
     # Other
     if args.languages:
         kw["languages"] = _split(args.languages)
@@ -445,7 +503,10 @@ def build_parser():
     search_p.add_argument("--mode", choices=["preview", "full", "auto"], default="auto")
     search_p.add_argument("--output", choices=["csv", "sqlite", "json"], default="csv")
     search_p.add_argument("--output-file", "-f", help="Output file path")
-    search_p.add_argument("--limit", type=int, default=50)
+    search_p.add_argument("--limit", type=int, default=None,
+                          help="Total max results across all companies (default: plan cap)")
+    search_p.add_argument("--limit-per-company", type=int, default=None,
+                          help="Max results per company (default: no per-company cap)")
     # Filter: seniority & functions
     search_p.add_argument("--seniority", help="Comma-separated seniority levels")
     search_p.add_argument("--functions", help="Comma-separated job functions")
@@ -493,6 +554,10 @@ def build_parser():
     search_p.add_argument("--min-role-months", type=int, help="Min months in current role")
     search_p.add_argument("--max-role-months", type=int, help="Max months in current role")
 
+    # Filter: role date range
+    search_p.add_argument("--role-range-start-month", type=int, help="Role start date filter (months ago)")
+    search_p.add_argument("--role-range-end-month", type=int, help="Role end date filter (months ago)")
+
     # Filter: other
     search_p.add_argument("--languages", help="Comma-separated languages")
     search_p.add_argument("--names", help="Comma-separated person names to filter")
@@ -534,6 +599,9 @@ def build_parser():
     # --- setup ---
     sub.add_parser("setup", help="Interactive setup wizard")
 
+    # --- update ---
+    sub.add_parser("update", help="Update autoclay to latest version")
+
     return parser, {"people": people_parser, "table": table_parser, "auth": auth_parser, "keywords": kw_parser}
 
 
@@ -548,12 +616,18 @@ def main():
     args = parser.parse_args()
 
     if not args.command:
+        print(BANNER)
+        print(TAGLINE)
+        print()
         parser.print_help()
         sys.exit(1)
 
-    # Setup is a top-level command (no subcommand)
+    # Top-level commands (no subcommand)
     if args.command == "setup":
         cmd_setup(args)
+        return
+    if args.command == "update":
+        cmd_update(args)
         return
 
     dispatch = {

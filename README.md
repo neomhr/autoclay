@@ -1,17 +1,29 @@
 # autoclay
 
-Python SDK and CLI for Clay's People Search API. Stdlib only — zero external dependencies.
+CLI for Clay's People Search API. Zero external dependencies.
 
-## Install
+## Quick Install
 
 ```bash
-pip install .
+curl -sSf https://raw.githubusercontent.com/neomohr/autoclay/main/install.sh | bash
+clay setup
 ```
 
-Or editable for development:
+This clones the repo to `~/.autoclay/src/`, installs the `clay` command, and links a Claude Code skill so Claude can use the CLI from any directory.
+
+### Manual Install
 
 ```bash
+git clone https://github.com/neomohr/autoclay.git
+cd autoclay
 pip install -e .
+clay setup
+```
+
+### Update
+
+```bash
+clay update
 ```
 
 ## Setup
@@ -20,9 +32,9 @@ pip install -e .
 clay setup
 ```
 
-This prompts for your Clay email/password, verifies authentication, and stores credentials in `.env` in the current directory.
+This prompts for your Clay email/password, verifies authentication, and stores credentials in `~/.autoclay/credentials.json` (permissions `0600`). The session cookie is cached in `~/.autoclay/session.json` and shared across parallel processes (23h TTL, auto-refreshes).
 
-Alternatively, set environment variables directly:
+Alternatively, set environment variables (these override the credentials file):
 
 ```bash
 export CLAY_EMAIL=you@example.com
@@ -36,8 +48,6 @@ Verify auth:
 clay auth login
 ```
 
-The session cookie is obtained via email/password login and auto-refreshes every 23 hours. No browser or manual cookie copying needed.
-
 ## CLI Reference
 
 ### People Search
@@ -46,6 +56,9 @@ The session cookie is obtained via email/password login and auto-refreshes every
 # Basic search (auto mode: preview if limit <= 50, else full)
 clay people search --domains acme.com
 
+# No domains — search across all companies matching filters
+clay people search --title-keywords "CEO" --countries "United States"
+
 # Multi-domain
 clay people search --domains "acme.com,example.com,startup.io"
 
@@ -53,10 +66,13 @@ clay people search --domains "acme.com,example.com,startup.io"
 clay people search --domains-file companies.csv
 
 # Full mode (creates Clay table, polls, extracts all records)
-clay people search --domains acme.com --mode full --limit 2000
+clay people search --domains acme.com --mode full
 
 # Preview mode (max 50 results, no table creation)
 clay people search --domains acme.com --mode preview
+
+# Limit total results and per-company results
+clay people search --domains "acme.com,example.com" --limit 500 --limit-per-company 100
 
 # Output formats
 clay people search --domains acme.com --output csv          # default
@@ -140,6 +156,20 @@ clay people search --domains acme.com -q
 --max-role-months 24     # at most 24 months in current role
 ```
 
+#### Role Date Range
+
+```bash
+--role-range-start-month 3    # role start date filter (months ago)
+--role-range-end-month 12     # role end date filter (months ago)
+```
+
+#### Limits
+
+```bash
+--limit 500              # total max results across all companies (default: plan cap ~25k)
+--limit-per-company 50   # max results per company (default: no cap)
+```
+
 #### Other
 
 ```bash
@@ -161,7 +191,7 @@ clay people search \
   --headline-keywords "growth" \
   --min-connections 500 \
   --mode full \
-  --limit 500 \
+  --limit-per-company 200 \
   -f github_leaders.csv \
   --cleanup
 ```
@@ -190,146 +220,13 @@ clay auth login     # login and verify session
 clay auth status    # show current auth status
 ```
 
-## SDK Usage (Python)
+## How it works
 
-```python
-from autoclay import ClayClient, PeopleSearch, SearchFilters, KeywordExpander
+- **Preview mode** — fast, no credits, max 50 results. Good for testing filters.
+- **Full mode** — creates a Clay table, polls for completion, extracts all records. Use for production searches.
+- **Auto mode** (default) — preview if limit <= 50, full otherwise.
 
-# Initialize
-client = ClayClient()
-ps = PeopleSearch(client)
-
-# Simple search
-result = ps.search(["acme.com"])
-
-# With filters
-filters = SearchFilters(
-    seniority_levels=["vp", "director"],
-    job_functions=["Engineering", "Sales"],
-    countries_include=["United States"],
-    company_sizes=["51-200", "201-500"],
-    job_title_keywords=["VP", "Director"],
-    headline_keywords=["growth"],
-    connection_count=500,
-    current_role_min_months=6,
-)
-result = ps.search(
-    ["github.com"],
-    filters=filters,
-    limit=500,
-    mode="full",
-    cleanup=True,
-)
-
-for person in result.people:
-    print(f"{person.full_name} — {person.job_title} @ {person.company_domain}")
-
-# Output writers
-from autoclay.output import write_csv, write_sqlite, write_json
-
-write_csv(result.people, "output.csv")
-write_sqlite(result.people, "contacts.db")     # dedupes on linkedin_url
-json_str = write_json(result.people)            # returns JSON string
-
-# Keyword expansion
-expander = KeywordExpander(client)
-related = expander.get_related(["director", "leader"])
-print(related)
-
-# Table management
-from autoclay import TableManager
-
-tm = TableManager(client)
-tables = tm.list_tables()
-tm.delete_table("t_xxx")
-```
-
-## Architecture
-
-```
-autoclay/
-├── __init__.py           # Public exports
-├── __main__.py           # python -m autoclay entry point
-├── auth.py               # Session management (login, cookie refresh, 23h auto-refresh)
-├── client.py             # HTTP client (auth, retries, 401 re-login)
-├── cli.py                # argparse CLI dispatcher
-├── config.py             # Constants (API base, action IDs, timeouts)
-├── enums.py              # Validated enum values (seniority, functions, sizes)
-├── exceptions.py         # Error hierarchy
-├── models.py             # Dataclasses (Person, SearchFilters, SearchResult, etc.)
-├── output/               # Output writers (CSV, SQLite, JSON)
-├── search/
-│   ├── _base.py          # Abstract 6-step Sculptor flow
-│   ├── keywords.py       # Related keywords expansion API
-│   └── people.py         # People search (build_inputs, parse records)
-└── tables/
-    ├── manager.py         # Table CRUD + field mapping
-    └── records.py         # Record fetching + parsing
-```
-
-### Search Flow
-
-The SDK implements Clay's 6-step "Sculptor" flow:
-
-1. **Create conversation** — `POST /v3/{wsId}/ai-generation/chat-conversation`
-2. **Preview search** — `POST /v3/actions/run-enrichment` (max 50 results, returns taskId)
-3. **Create table** — `POST /v3/sources/create-cpj-table` (uses conversationId + taskId)
-4. **Poll completion** — `GET /v3/sources/{sourceId}/runs?limit=1`
-5. **Fetch record IDs** — `GET /v3/tables/{tableId}/views/{viewId}/records/ids`
-6. **Bulk fetch records** — `POST /v3/tables/{tableId}/bulk-fetch-records`
-
-Preview mode runs only step 2. Full mode runs all 6 steps.
-
-### Retry Logic
-
-- 5xx errors: exponential backoff (1s/2s/4s), 3 attempts
-- 401 errors: automatic session refresh + single retry
-- Source polling: configurable timeout (default 120s)
-
-## Filter Fields Reference
-
-| SearchFilters field | API parameter | Type | CLI flag |
-|---|---|---|---|
-| seniority_levels | job_title_seniority_levels | string[] | --seniority |
-| job_functions | job_functions | string[] | --functions |
-| job_title_keywords | job_title_keywords | string[] | --title-keywords |
-| job_title_exclude_keywords | job_title_exclude_keywords | string[] | --exclude-titles |
-| job_title_mode | job_title_mode | string | --title-mode |
-| countries_include | location_countries_include | string[] | --countries |
-| countries_exclude | location_countries_exclude | string[] | --countries-exclude |
-| states_include | location_states_include | string[] | --states |
-| states_exclude | location_states_exclude | string[] | --states-exclude |
-| cities_include | location_cities_include | string[] | --cities |
-| cities_exclude | location_cities_exclude | string[] | --cities-exclude |
-| regions_include | location_regions_include | string[] | --regions |
-| regions_exclude | location_regions_exclude | string[] | --regions-exclude |
-| company_sizes | company_sizes | string[] | --company-sizes |
-| company_industries_include | company_industries_include | string[] | --industries |
-| company_industries_exclude | company_industries_exclude | string[] | --industries-exclude |
-| company_description_keywords | company_description_keywords | string[] | --company-keywords |
-| company_description_keywords_exclude | company_description_keywords_exclude | string[] | --company-keywords-exclude |
-| headline_keywords | headline_keywords | string[] | --headline-keywords |
-| about_keywords | about_keywords | string[] | --about-keywords |
-| profile_keywords | profile_keywords | string[] | --profile-keywords |
-| job_description_keywords | job_description_keywords | string[] | --job-description-keywords |
-| certification_keywords | certification_keywords | string[] | --certification-keywords |
-| school_names | school_names | string[] | --school-names |
-| connection_count | connection_count | int | --min-connections |
-| max_connection_count | max_connection_count | int | --max-connections |
-| follower_count | follower_count | int | --min-followers |
-| max_follower_count | max_follower_count | int | --max-followers |
-| experience_count | experience_count | int | --min-experience |
-| max_experience_count | max_experience_count | int | --max-experience |
-| current_role_min_months | current_role_min_months_since_start_date | int | --min-role-months |
-| current_role_max_months | current_role_max_months_since_start_date | int | --max-role-months |
-| languages | languages | string[] | --languages |
-| names | names | string[] | --names |
-| include_past_experiences | include_past_experiences | bool | --include-past |
-| role_range_start_month | role_range_start_month | int | SDK only |
-| role_range_end_month | role_range_end_month | int | SDK only |
-| job_title_exact_match | job_title_exact_match | bool | SDK only |
-| job_title_exact_keyword_match | job_title_exact_keyword_match | bool | SDK only |
-| search_raw_location | search_raw_location | bool | SDK only |
+Credentials are stored in `~/.autoclay/credentials.json`. The session cookie is cached in `~/.autoclay/session.json` and auto-refreshes every 23 hours. Parallel processes share the cached session.
 
 ## Enum Values
 
@@ -354,8 +251,8 @@ Preview mode runs only step 2. Full mode runs all 6 steps.
 - **Authentication:** Uses session cookies, not API keys. Sessions expire and require re-login.
 - **Rate limits:** 25,000 people search lookups per account. Preview limited to 50 results.
 - **No server-side exclusion:** De-duplication against previously fetched records must be handled locally (e.g., via SQLite output with dedup on LinkedIn URL).
-- **Industries list:** Uses LinkedIn's industry taxonomy (~200+ values). Not enumerated in the SDK — pass exact LinkedIn industry name strings.
-- **Countries list:** Standard world country names (~240). Not enumerated — pass full English country names.
+- **Industries list:** Uses LinkedIn's industry taxonomy (~200+ values). Pass exact LinkedIn industry name strings.
+- **Countries list:** Standard world country names (~240). Pass full English country names.
 
 ## License
 

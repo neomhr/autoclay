@@ -38,6 +38,7 @@ class BaseSearch:
         identifiers,
         filters=None,
         limit=None,
+        limit_per_company=None,
         mode="auto",
         cleanup=False,
         on_progress=None,
@@ -47,7 +48,8 @@ class BaseSearch:
         Args:
             identifiers: List of search identifiers (e.g. company domains).
             filters: Optional SearchFilters dataclass.
-            limit: Max results to return (None = API default).
+            limit: Total max results across all companies (None = API default).
+            limit_per_company: Max results per company (None = no per-company cap).
             mode: "auto" (preview if limit <= 50, else full), "preview", or "full".
             cleanup: If True, delete the table after fetching records (full mode only).
             on_progress: Optional callable(str) for progress messages.
@@ -64,8 +66,8 @@ class BaseSearch:
         use_preview = self._resolve_mode(mode, limit)
 
         if use_preview:
-            return self._run_preview(identifiers, filters, limit, on_progress)
-        return self._full_search(identifiers, filters, limit, cleanup, on_progress)
+            return self._run_preview(identifiers, filters, limit, limit_per_company, on_progress)
+        return self._full_search(identifiers, filters, limit, limit_per_company, cleanup, on_progress)
 
     # -- Mode resolution ------------------------------------------------------
 
@@ -81,7 +83,7 @@ class BaseSearch:
 
     # -- Preview flow ---------------------------------------------------------
 
-    def _preview_search(self, identifiers, filters, limit):
+    def _preview_search(self, identifiers, filters, limit, limit_per_company=None):
         """Execute a synchronous preview search.
 
         Returns:
@@ -98,7 +100,7 @@ class BaseSearch:
                 "returnTaskId": True,
                 "returnActionMetadata": True,
             },
-            "inputs": self.build_inputs(identifiers, filters, limit),
+            "inputs": self.build_inputs(identifiers, filters, limit, limit_per_company),
         }
 
         data = self.client.post("actions/run-enrichment", body)
@@ -107,10 +109,10 @@ class BaseSearch:
         people = [self.parse_preview_record(p) for p in raw_people]
         return task_id, people
 
-    def _run_preview(self, identifiers, filters, limit, on_progress):
+    def _run_preview(self, identifiers, filters, limit, limit_per_company, on_progress):
         """Run preview and wrap into SearchResult."""
         on_progress("Running preview search...")
-        _, people = self._preview_search(identifiers, filters, limit)
+        _, people = self._preview_search(identifiers, filters, limit, limit_per_company)
         on_progress(f"Preview complete — {len(people)} results.")
         return SearchResult(
             people=people,
@@ -120,7 +122,7 @@ class BaseSearch:
 
     # -- Full table flow ------------------------------------------------------
 
-    def _full_search(self, identifiers, filters, limit, cleanup, on_progress):
+    def _full_search(self, identifiers, filters, limit, limit_per_company, cleanup, on_progress):
         """Execute the full 6-step Sculptor flow.
 
         1. Create conversation
@@ -135,12 +137,12 @@ class BaseSearch:
 
         # Step 2: Run preview for taskId
         on_progress("Step 2/6: Running preview for task ID...")
-        task_id, _ = self._preview_search(identifiers, filters, 50)
+        task_id, _ = self._preview_search(identifiers, filters, 50, limit_per_company)
 
         # Step 3: Create table
         on_progress("Step 3/6: Creating table...")
         table_meta = self._create_table(
-            identifiers, filters, limit, conversation_id, task_id
+            identifiers, filters, limit, limit_per_company, conversation_id, task_id
         )
         table_id = table_meta["tableId"]
         view_id = table_meta["viewId"]
@@ -193,7 +195,7 @@ class BaseSearch:
         )
         return resp["conversationId"]
 
-    def _create_table(self, identifiers, filters, limit, conversation_id, task_id):
+    def _create_table(self, identifiers, filters, limit, limit_per_company, conversation_id, task_id):
         """Step 3: Create a CPJ table from the search spec."""
         body = {
             "workspaceId": self.client.workspace_id,
@@ -215,7 +217,7 @@ class BaseSearch:
                     "scheduleConfig": {"runSettings": "once"},
                     "dedupeOnUniqueIds": True,
                     "hasEvaluatedInputs": True,
-                    "inputs": self.build_inputs(identifiers, filters, limit),
+                    "inputs": self.build_inputs(identifiers, filters, limit, limit_per_company),
                     "previewActionKey": self.PREVIEW_ACTION_KEY,
                 },
                 "clientSettings": {"tableType": self.TABLE_TYPE},
@@ -252,13 +254,14 @@ class BaseSearch:
 
     # -- Abstract methods (subclass must implement) ---------------------------
 
-    def build_inputs(self, identifiers, filters, limit):
+    def build_inputs(self, identifiers, filters, limit, limit_per_company=None):
         """Build the API inputs dict for this search type.
 
         Args:
             identifiers: List of search identifiers.
             filters: SearchFilters dataclass.
-            limit: Max results, or None.
+            limit: Total max results, or None.
+            limit_per_company: Max results per company, or None.
 
         Returns:
             dict suitable for the Clay API inputs field.

@@ -21,13 +21,14 @@ class PeopleSearch(BaseSearch):
         {"name": "LinkedIn Profile", "dataType": "url", "formulaText": "{{source}}.url", "isDedupeField": True},
     ]
 
-    def build_inputs(self, identifiers, filters, limit):
+    def build_inputs(self, identifiers, filters, limit, limit_per_company=None):
         """Build the full inputs dict for people search.
 
         Args:
             identifiers: List of company domains.
             filters: SearchFilters dataclass.
-            limit: Max results, or None.
+            limit: Total max results across all companies, or None.
+            limit_per_company: Max results per company, or None.
 
         Returns:
             dict matching the Clay people-search API schema.
@@ -40,6 +41,7 @@ class PeopleSearch(BaseSearch):
             "company_audience_segment_id": None,
             "include_company_filter_bitmap": None,
             "limit": limit,
+            "limit_per_company": limit_per_company,
             "job_functions": filters.job_functions,
             "job_title_keywords": filters.job_title_keywords,
             "job_title_exclude_keywords": filters.job_title_exclude_keywords,
@@ -105,6 +107,8 @@ class PeopleSearch(BaseSearch):
 
     def _workbook_name(self, identifiers):
         """Generate a workbook name from the search identifiers."""
+        if not identifiers:
+            return "People Search - All"
         if len(identifiers) == 1:
             return f"People Search - {identifiers[0]}"
         return f"People Search - {len(identifiers)} companies"
