@@ -7,7 +7,7 @@ set -euo pipefail
 AUTOCLAY_DIR="$HOME/.autoclay"
 SRC_DIR="$AUTOCLAY_DIR/src"
 SKILL_LINK="$HOME/.claude/skills/autoclay"
-REPO_URL="https://github.com/neomohr/autoclay.git"
+REPO_URL="https://github.com/neomhr/autoclay.git"
 
 banner() {
     echo ""

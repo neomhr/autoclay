@@ -5,7 +5,7 @@ CLI for Clay's People Search API. Zero external dependencies.
 ## Quick Install
 
 ```bash
-curl -sSf https://raw.githubusercontent.com/neomohr/autoclay/main/install.sh | bash
+curl -sSf https://raw.githubusercontent.com/neomhr/autoclay/main/install.sh | bash
 clay setup
 ```
 
@@ -14,7 +14,7 @@ This clones the repo to `~/.autoclay/src/`, installs the `clay` command, and lin
 ### Manual Install
 
 ```bash
-git clone https://github.com/neomohr/autoclay.git
+git clone https://github.com/neomhr/autoclay.git
 cd autoclay
 pip install -e .
 clay setup
