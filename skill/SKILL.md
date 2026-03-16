@@ -89,6 +89,7 @@ Omitting `--domains` searches across all companies matching the filters.
 | `--output-file` / `-f` | path | Output file path |
 | `--limit` | int | Total max results across all companies. Default: plan cap (~25k). Only set when deliberately sampling |
 | `--limit-per-company` | int | Max results per company. Default: no per-company cap |
+| `--batch-size` | int | Domains per Clay table in full mode (default: 1). Set to 25-50 for large runs to cut API calls. |
 | `--cleanup` | flag | Delete Clay table after extraction |
 | `--quiet` / `-q` | flag | Suppress progress output |
 
