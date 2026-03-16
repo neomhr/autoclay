@@ -66,13 +66,20 @@ def cmd_people_search(args):
             _progress(f"  Limit per company: {args.limit_per_company}")
 
     if args.mode == "full" and len(domains) > 1:
-        # Full mode: one search per domain for best coverage
+        # Full mode: batch domains into chunks for Clay table creation
+        batch_size = args.batch_size
         all_people = []
-        for i, domain in enumerate(domains):
+        chunks = [domains[i:i + batch_size] for i in range(0, len(domains), batch_size)]
+        for chunk_idx, chunk in enumerate(chunks):
+            start = chunk_idx * batch_size + 1
+            end = start + len(chunk) - 1
             if not quiet:
-                _progress(f"[{i+1}/{len(domains)}] {domain}")
+                if batch_size == 1:
+                    _progress(f"[{start}/{len(domains)}] {chunk[0]}")
+                else:
+                    _progress(f"[{start}-{end}/{len(domains)}] {', '.join(chunk[:3])}{'...' if len(chunk) > 3 else ''}")
             result = ps.search(
-                [domain],
+                chunk,
                 filters=filters,
                 limit=args.limit,
                 limit_per_company=args.limit_per_company,
@@ -565,6 +572,8 @@ def build_parser():
 
     search_p.add_argument("--cleanup", action="store_true", help="Delete Clay table after extraction")
     search_p.add_argument("--quiet", "-q", action="store_true", help="Suppress progress output")
+    search_p.add_argument("--batch-size", type=int, default=1,
+                          help="Domains per Clay table in full mode (default: 1)")
 
     # --- table ---
     table_parser = sub.add_parser("table", help="Table operations")
