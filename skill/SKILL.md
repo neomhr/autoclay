@@ -104,6 +104,8 @@ Omitting `--domains` searches across all companies matching the filters.
 ### Valid company sizes
 `1`, `2-10`, `11-50`, `51-200`, `201-500`, `501-1000`, `1001-5000`, `5001-10000`, `10001+`
 
+(Clay's canonical form uses comma-grouped thousands — e.g. `501-1,000`, `10,001+` — which the CLI accepts and normalizes. The comma-free form shown above is the recommended input.)
+
 ---
 
 ## Filter validation (mandatory before any significant run)

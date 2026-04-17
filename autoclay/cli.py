@@ -372,6 +372,46 @@ def _split(val):
     return [v.strip() for v in val.split(",") if v.strip()]
 
 
+# Clay's canonical company_sizes enum uses comma-grouped thousands in labels,
+# which collides with the comma separator used by --company-sizes. We accept
+# either form on input and normalize to Clay's canonical form before sending.
+_COMPANY_SIZE_CANONICAL = [
+    "1", "2-10", "11-50", "51-200", "201-500",
+    "501-1,000", "1,001-5,000", "5,001-10,000", "10,001+",
+]
+_COMPANY_SIZE_TOKENS = [
+    "10,001+", "5,001-10,000", "1,001-5,000", "501-1,000",
+    "10001+", "5001-10000", "1001-5000", "501-1000",
+    "201-500", "51-200", "11-50", "2-10", "1",
+]
+_COMPANY_SIZE_FREE_TO_CANONICAL = {
+    "10001+": "10,001+",
+    "5001-10000": "5,001-10,000",
+    "1001-5000": "1,001-5,000",
+    "501-1000": "501-1,000",
+}
+
+
+def _parse_company_sizes(val):
+    """Parse --company-sizes, accepting comma-free ('501-1000,1001-5000') or
+    Clay's canonical comma form ('501-1,000,1,001-5,000'). Returns canonical tokens."""
+    s = val.strip()
+    out = []
+    while s:
+        for tok in _COMPANY_SIZE_TOKENS:
+            if s.startswith(tok):
+                out.append(_COMPANY_SIZE_FREE_TO_CANONICAL.get(tok, tok))
+                s = s[len(tok):].lstrip(", \t")
+                break
+        else:
+            raise SystemExit(
+                f"error: --company-sizes: unrecognized bucket near {s!r}. "
+                f"Valid: {', '.join(_COMPANY_SIZE_CANONICAL)} "
+                f"(comma-free form also accepted, e.g. '501-1000')"
+            )
+    return out
+
+
 def _build_filters(args):
     kw = {}
 
@@ -409,7 +449,7 @@ def _build_filters(args):
 
     # Company
     if args.company_sizes:
-        kw["company_sizes"] = _split(args.company_sizes)
+        kw["company_sizes"] = _parse_company_sizes(args.company_sizes)
     if args.industries:
         kw["company_industries_include"] = _split(args.industries)
     if args.industries_exclude:
@@ -535,7 +575,9 @@ def build_parser():
     search_p.add_argument("--regions-exclude", help="Comma-separated regions to exclude")
 
     # Filter: company
-    search_p.add_argument("--company-sizes", help="Comma-separated company sizes (e.g. '1,2-10,51-200')")
+    search_p.add_argument("--company-sizes",
+                          help="Comma-separated company sizes (e.g. '51-200,201-500,501-1000'). "
+                               "Buckets with commas in labels are auto-normalized to Clay's canonical form.")
     search_p.add_argument("--industries", help="Comma-separated industries to include")
     search_p.add_argument("--industries-exclude", help="Comma-separated industries to exclude")
     search_p.add_argument("--company-keywords", help="Comma-separated company description keywords")

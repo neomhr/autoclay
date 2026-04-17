@@ -242,6 +242,8 @@ Credentials are stored in `~/.autoclay/credentials.json`. The session cookie is 
 
 `1`, `2-10`, `11-50`, `51-200`, `201-500`, `501-1000`, `1001-5000`, `5001-10000`, `10001+`
 
+Clay's canonical form uses comma-grouped thousands (`501-1,000`, `10,001+`). The CLI accepts either form and normalizes internally — the comma-free form shown above is recommended for `--company-sizes` since it avoids ambiguity with the `,` separator.
+
 ### Title Modes
 
 `smart` (default — fuzzy match), `contain` (substring match), `exact` (exact string match)
