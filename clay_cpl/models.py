@@ -1,4 +1,4 @@
-"""Data models for Clay SDK."""
+"""Data models for Clay CPL CLI."""
 
 from dataclasses import dataclass, field
 from typing import Any, Generic, List, Optional, TypeVar

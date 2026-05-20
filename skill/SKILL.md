@@ -1,29 +1,29 @@
 ---
-name: autoclay
-description: Use this skill when the user wants to search Clay companies, people, or jobs via AutoClay, build lead/account/job lists, run Clay source searches, export results, or inspect Clay tables.
+name: clay-cpl
+description: Use this skill when the user wants to search Clay companies, people, or jobs via Clay CPL CLI, build lead/account/job lists, run Clay source searches, export results, or inspect Clay tables.
 user-invocable: true
 ---
 
-# AutoClay CLI Skill
+# Clay CPL CLI Skill
 
-AutoClay is a local CLI wrapper around Clay's Companies, People, Jobs source APIs.
+Clay CPL CLI is a local CLI wrapper around Clay's Companies, People, Jobs source APIs.
 
 It supports:
 
 ```bash
-clay companies search ...
-clay people search ...
-clay jobs search ...
+clay-cpl companies search ...
+clay-cpl people search ...
+clay-cpl jobs search ...
 ```
 
-Credentials and sessions are stored locally in `~/.autoclay/credentials.json` and `~/.autoclay/session.json`. Set `CLAY_WORKSPACE_ID` explicitly for workspace-specific work.
+Credentials and sessions are stored locally in `~/.clay-cpl/credentials.json` and `~/.clay-cpl/session.json`. Set `CLAY_WORKSPACE_ID` explicitly for workspace-specific work.
 
 ## Search Commands
 
 ### Companies
 
 ```bash
-clay companies search \
+clay-cpl companies search \
   --countries "United States" \
   --industries "Software Development" \
   --limit 25 \
@@ -33,7 +33,7 @@ clay companies search \
 ### People
 
 ```bash
-clay people search \
+clay-cpl people search \
   --domains "openai.com,anthropic.com" \
   --title-keywords "Engineer,Developer Advocate" \
   --mode full \
@@ -45,7 +45,7 @@ clay people search \
 ### Jobs
 
 ```bash
-clay jobs search \
+clay-cpl jobs search \
   --domains openai.com \
   --title-keywords Engineer \
   --max-num-days-since-posted 30 \
@@ -62,7 +62,7 @@ All entity searches support:
 | `--limit N` | Client/source result limit |
 | `--output csv/json/sqlite` | Entity-shaped outputs |
 | `--output-file`, `-f` | Output path |
-| `--cleanup` | Delete generated Clay table/workbook after full search |
+| `--cleanup` | Delete generated Clay table/workbook after extraction |
 | `--quiet`, `-q` | Suppress progress |
 | `--inputs-json` | Exact raw Clay source inputs |
 | `--inputs-file` | JSON file with exact raw Clay source inputs |
@@ -74,8 +74,8 @@ Raw inputs replace typed filter construction. Only mode, output, cleanup, and cl
 People and jobs can start from an existing Clay company table by extracting domains:
 
 ```bash
-clay people search --from-company-table t_xxx --company-domain-field Domain --title-keywords CEO
-clay jobs search --from-company-table t_xxx --company-domain-field Domain --title-keywords Engineer
+clay-cpl people search --from-company-table t_xxx --company-domain-field Domain --title-keywords CEO
+clay-cpl jobs search --from-company-table t_xxx --company-domain-field Domain --title-keywords Engineer
 ```
 
 Outputs include `source_company_table_id` and `source_company_domain` when this join path is used.
@@ -83,10 +83,10 @@ Outputs include `source_company_table_id` and `source_company_domain` when this 
 ## Table Commands
 
 ```bash
-clay table list
-clay table info <table_id>
-clay table count <table_id>
-clay table delete <table_id>
+clay-cpl table list
+clay-cpl table info <table_id>
+clay-cpl table count <table_id>
+clay-cpl table delete <table_id>
 ```
 
 ## Rules

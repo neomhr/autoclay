@@ -1,16 +1,16 @@
-# AutoClay CPJ Parity Plan
+# Clay CPL CLI CPJ Parity Plan
 
 ## Summary
 
-Build AutoClay around Clay's "Companies, People, Jobs" source primitives, with neutral agent-friendly commands for company, people, and job search. Preserve the current `clay people search` behavior, add `clay companies search` and `clay jobs search`, and support both typed CLI filters and exact raw Clay input payloads.
+Build Clay CPL CLI around Clay's "Companies, People, Jobs" source primitives, with neutral agent-friendly commands for company, people, and job search. Support `clay-cpl companies search`, `clay-cpl people search`, and `clay-cpl jobs search`, plus both typed CLI filters and exact raw Clay input payloads.
 
 ## Key Changes
 
 - Refactor the current people-only search stack into a generic CPJ source engine.
 - Add neutral entity commands:
-  - `clay companies search`
-  - `clay people search`
-  - `clay jobs search`
+  - `clay-cpl companies search`
+  - `clay-cpl people search`
+  - `clay-cpl jobs search`
 - Shared flags: `--mode`, `--limit`, `--output csv|json|sqlite`, `--output-file/-f`, `--cleanup`, `--quiet`, `--inputs-json`, `--inputs-file`.
 - Raw inputs replace typed filter construction. Output, mode, cleanup, and client-side limit behavior remain CLI-controlled.
 - Add typed filter parity for the current Clay UI action schemas from `actions?workspaceId=<workspace_id>`:
@@ -23,8 +23,8 @@ Build AutoClay around Clay's "Companies, People, Jobs" source primitives, with n
   - Jobs JSON: `{ "count": n, "jobs": [...] }`
   - SQLite tables: `clay_companies`, `clay_people`, `clay_jobs`.
 - Add join primitives:
-  - `clay jobs search --from-company-table <table_id> --company-domain-field <field name>`
-  - `clay people search --from-company-table <table_id> --company-domain-field <field name>`
+  - `clay-cpl jobs search --from-company-table <table_id> --company-domain-field <field name>`
+  - `clay-cpl people search --from-company-table <table_id> --company-domain-field <field name>`
 
 ## Validation Notes
 

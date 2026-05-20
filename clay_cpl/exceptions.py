@@ -1,8 +1,8 @@
-"""Clay SDK exceptions."""
+"""Clay CPL CLI exceptions."""
 
 
 class ClayError(Exception):
-    """Base exception for Clay SDK."""
+    """Base exception for Clay CPL CLI."""
 
 
 class ClayAuthError(ClayError):

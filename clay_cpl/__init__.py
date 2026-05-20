@@ -1,16 +1,16 @@
-"""Clay Python SDK — composable API wrapper for Clay's internal API.
+"""Internal Python API for the Clay CPL CLI.
 
 Usage (programmatic):
-    from autoclay import ClayClient, PeopleSearch, SearchFilters
+    from clay_cpl import ClayClient, PeopleSearch, SearchFilters
 
     client = ClayClient()
     ps = PeopleSearch(client)
     result = ps.search(["acme.com"], filters=SearchFilters(seniority_levels=["vp"]))
 
 Usage (CLI):
-    clay people search --domains acme.com
-    clay table list
-    clay auth login
+    clay-cpl people search --domains acme.com
+    clay-cpl table list
+    clay-cpl auth login
 """
 
 from .client import ClayClient

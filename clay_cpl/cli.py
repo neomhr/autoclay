@@ -1,4 +1,4 @@
-"""Clay SDK CLI - argparse dispatcher."""
+"""Clay CPL CLI - argparse dispatcher."""
 
 import argparse
 import csv
@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .auth import SessionManager
 from .client import ClayClient
-from .config import AUTOCLAY_DIR, CREDENTIALS_FILE, save_credentials
+from .config import CLAY_CPL_DIR, CREDENTIALS_FILE, save_credentials
 from .exceptions import ClayAuthError
 from .models import SearchFilters
 from .output import write_csv, write_json, write_sqlite
@@ -349,7 +349,7 @@ def cmd_keywords_expand(args):
 
 def cmd_setup(args):
     print()
-    print("Clay SDK Setup")
+    print("Clay CPL CLI Setup")
     print()
 
     existing_email = None
@@ -362,7 +362,7 @@ def cmd_setup(args):
     if existing_email:
         overwrite = input(f"Overwrite existing credentials ({existing_email})? [y/N] ").strip().lower()
         if overwrite not in ("y", "yes"):
-            print("Keeping existing credentials. Run 'clay auth status' to check session.")
+            print("Keeping existing credentials. Run 'clay-cpl auth status' to check session.")
             return
     try:
         email = input("Email: ").strip()
@@ -394,7 +394,7 @@ def cmd_setup(args):
 
 
 def _find_source_dir():
-    standard = AUTOCLAY_DIR / "src"
+    standard = CLAY_CPL_DIR / "src"
     if (standard / ".git").is_dir():
         return standard
     pkg_root = Path(__file__).resolve().parent.parent
@@ -406,7 +406,7 @@ def _find_source_dir():
 def cmd_update(args):
     src_dir = _find_source_dir()
     if not src_dir:
-        print("Error: Cannot find autoclay source directory.", file=sys.stderr)
+        print("Error: Cannot find Clay CPL CLI source directory.", file=sys.stderr)
         print("If you installed manually, cd into the repo and run: git pull", file=sys.stderr)
         sys.exit(1)
 
@@ -653,7 +653,7 @@ def _add_job_alias_args(parser):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(prog="clay", description="Clay SDK CLI")
+    parser = argparse.ArgumentParser(prog="clay-cpl", description="Clay CPL CLI")
     sub = parser.add_subparsers(dest="command")
 
     subparsers = {}
@@ -710,7 +710,7 @@ def build_parser():
     setup_p = sub.add_parser("setup", help="Interactive setup wizard")
     setup_p.set_defaults(func=cmd_setup)
 
-    update_p = sub.add_parser("update", help="Update autoclay to latest version")
+    update_p = sub.add_parser("update", help="Update Clay CPL CLI to latest version")
     update_p.set_defaults(func=cmd_update)
 
     return parser, subparsers

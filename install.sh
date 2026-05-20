@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# AutoClay installer
-# Usage: curl -sSf https://raw.githubusercontent.com/<user>/autoclay/main/install.sh | bash
+# Clay CPL CLI installer
+# Usage: curl -sSf https://raw.githubusercontent.com/neomhr/autoclay/main/install.sh | bash
 
-AUTOCLAY_DIR="$HOME/.autoclay"
-SRC_DIR="$AUTOCLAY_DIR/src"
-SKILL_LINK="$HOME/.claude/skills/autoclay"
+CLAY_CPL_DIR="$HOME/.clay-cpl"
+SRC_DIR="$CLAY_CPL_DIR/src"
+SKILL_LINK="$HOME/.claude/skills/clay-cpl"
+OLD_SKILL_LINK="$HOME/.claude/skills/autoclay"
 REPO_URL="https://github.com/neomhr/autoclay.git"
 
 banner() {
@@ -17,6 +18,7 @@ banner() {
     echo "      ██   ██ ██    ██    ██    ██    ██ ██      ██      ██   ██    ██"
     echo "      ██   ██  ██████     ██     ██████   ██████ ███████ ██   ██    ██"
     echo ""
+    echo "      Clay CPL CLI"
     echo "      Built by Neo Mohr"
     echo ""
 }
@@ -63,27 +65,30 @@ if [ -d "$SRC_DIR/.git" ]; then
     info "Updating existing installation..."
     git -C "$SRC_DIR" pull --quiet
 else
-    info "Cloning autoclay to $SRC_DIR..."
-    mkdir -p "$AUTOCLAY_DIR"
-    chmod 700 "$AUTOCLAY_DIR"
+    info "Cloning Clay CPL CLI to $SRC_DIR..."
+    mkdir -p "$CLAY_CPL_DIR"
+    chmod 700 "$CLAY_CPL_DIR"
     git clone --quiet "$REPO_URL" "$SRC_DIR"
 fi
 
 # -- Step 3: Install via pip (editable) -------------------------------------
 
-info "Installing clay CLI..."
+info "Removing old package name if present..."
+$PYTHON -m pip uninstall -y autoclay --quiet >/dev/null 2>&1 || true
+
+info "Installing clay-cpl CLI..."
 $PYTHON -m pip install -e "$SRC_DIR" --quiet 2>/dev/null || \
 $PYTHON -m pip install -e "$SRC_DIR" --quiet --break-system-packages 2>/dev/null || {
     fail "pip install failed. You may need to install pip:
     $PYTHON -m ensurepip --upgrade"
 }
 
-# Verify clay is on PATH
-if command -v clay &>/dev/null; then
-    info "clay command installed at $(command -v clay)"
+# Verify clay-cpl is on PATH
+if command -v clay-cpl &>/dev/null; then
+    info "clay-cpl command installed at $(command -v clay-cpl)"
 else
     # pip --user install may put it in ~/.local/bin
-    warn "clay is installed but not on PATH."
+    warn "clay-cpl is installed but not on PATH."
     warn "Add this to your shell profile:"
     warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
@@ -93,7 +98,9 @@ fi
 if [ -d "$HOME/.claude" ]; then
     info "Installing Claude Code skill..."
     mkdir -p "$HOME/.claude/skills"
-    # Remove existing symlink or directory
+    if [ -L "$OLD_SKILL_LINK" ]; then
+        rm "$OLD_SKILL_LINK"
+    fi
     if [ -L "$SKILL_LINK" ] || [ -d "$SKILL_LINK" ]; then
         rm -rf "$SKILL_LINK"
     fi
@@ -101,7 +108,7 @@ if [ -d "$HOME/.claude" ]; then
     info "Claude Code skill linked at $SKILL_LINK"
 else
     info "Claude Code not detected (~/.claude/ not found). Skipping skill install."
-    info "To install later: ln -s $SRC_DIR/skill ~/.claude/skills/autoclay"
+    info "To install later: ln -s $SRC_DIR/skill ~/.claude/skills/clay-cpl"
 fi
 
 # -- Step 5: Prompt for setup -----------------------------------------------
@@ -109,7 +116,7 @@ fi
 echo ""
 echo "  ─── Installation complete! ───"
 echo ""
-echo "  Next step: run 'clay setup' to configure your Clay credentials."
+echo "  Next step: run 'clay-cpl setup' to configure your Clay credentials."
 echo ""
-echo "  To update later: clay update"
+echo "  To update later: clay-cpl update"
 echo ""

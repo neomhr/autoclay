@@ -1,4 +1,4 @@
-"""AutoClay Companies/People/Jobs regression tests."""
+"""Clay CPL CLI Companies/People/Jobs regression tests."""
 
 import csv
 import json
@@ -10,10 +10,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autoclay.cli import _build_filters, _parse_company_sizes, build_parser
-from autoclay.models import CompanyRecord, JobRecord, PersonRecord
-from autoclay.output import write_csv, write_json, write_sqlite
-from autoclay.search import CompanySearch, JobSearch, PeopleSearch
+from clay_cpl.cli import _build_filters, _parse_company_sizes, build_parser
+from clay_cpl.models import CompanyRecord, JobRecord, PersonRecord
+from clay_cpl.output import write_csv, write_json, write_sqlite
+from clay_cpl.search import CompanySearch, JobSearch, PeopleSearch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +23,7 @@ LIVE_WORKSPACE_ID = os.environ.get("CLAY_WORKSPACE_ID")
 def run_cli(*args, timeout=180):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT)
-    cmd = [sys.executable, "-m", "autoclay", *args]
+    cmd = [sys.executable, "-m", "clay_cpl", *args]
     return subprocess.run(
         cmd,
         cwd=ROOT,
@@ -37,6 +37,7 @@ def run_cli(*args, timeout=180):
 class UnitTests(unittest.TestCase):
     def test_commands_are_wired(self):
         parser, _ = build_parser()
+        self.assertEqual(parser.prog, "clay-cpl")
         for command in ("companies", "people", "jobs"):
             args = parser.parse_args([command, "search", "--mode", "preview", "--limit", "1"])
             self.assertEqual(args.entity, command)

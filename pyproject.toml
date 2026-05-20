@@ -3,15 +3,15 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "autoclay"
+name = "clay-cpl"
 version = "0.1.0"
-description = "Python SDK and CLI for Clay's Companies, People, Jobs source APIs"
+description = "CLI for Clay's Companies, People, and Jobs source workflows"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"
 
 [tool.setuptools.packages.find]
-include = ["autoclay*"]
+include = ["clay_cpl*"]
 
 [project.scripts]
-clay = "autoclay.cli:main"
+clay-cpl = "clay_cpl.cli:main"

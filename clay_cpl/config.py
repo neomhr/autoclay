@@ -1,4 +1,4 @@
-"""Clay SDK configuration."""
+"""Clay CPL CLI configuration."""
 
 import json
 import os
@@ -21,13 +21,13 @@ MAX_RETRIES = 3
 RETRY_BACKOFF = [1, 2, 4]
 SESSION_COOKIE_MAX_AGE_HOURS = 23
 
-AUTOCLAY_DIR = Path.home() / ".autoclay"
-CREDENTIALS_FILE = AUTOCLAY_DIR / "credentials.json"
-SESSION_FILE = AUTOCLAY_DIR / "session.json"
+CLAY_CPL_DIR = Path.home() / ".clay-cpl"
+CREDENTIALS_FILE = CLAY_CPL_DIR / "credentials.json"
+SESSION_FILE = CLAY_CPL_DIR / "session.json"
 
 
-def ensure_autoclay_dir():
-    AUTOCLAY_DIR.mkdir(mode=0o700, exist_ok=True)
+def ensure_clay_cpl_dir():
+    CLAY_CPL_DIR.mkdir(mode=0o700, exist_ok=True)
 
 
 def _load_credentials_file():
@@ -40,7 +40,7 @@ def _load_credentials_file():
 
 
 def save_credentials(email, password, workspace_id):
-    ensure_autoclay_dir()
+    ensure_clay_cpl_dir()
     CREDENTIALS_FILE.write_text(
         json.dumps({"email": email, "password": password, "workspace_id": workspace_id}, indent=2) + "\n"
     )
@@ -51,7 +51,7 @@ def get_workspace_id():
     workspace_id = os.environ.get("CLAY_WORKSPACE_ID") or _load_credentials_file().get("workspace_id")
     if not workspace_id:
         raise RuntimeError(
-            "CLAY_WORKSPACE_ID is not set. Run 'clay setup' or set the environment variable."
+            "CLAY_WORKSPACE_ID is not set. Run 'clay-cpl setup' or set the environment variable."
         )
     return str(workspace_id)
 

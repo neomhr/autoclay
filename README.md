@@ -1,34 +1,36 @@
-# Clay Python SDK
+# Clay CPL CLI
 
-Composable Python SDK and CLI for Clay's internal Companies, People, Jobs source APIs. Stdlib only.
+Terminal CLI for Clay's Companies, People, and Jobs source workflows. It is built for agent-friendly list creation, table inspection, and exports from Clay's internal CPL source APIs.
+
+This is a CLI-first project. The Python package exists as the implementation layer behind the `clay-cpl` command.
 
 ## Quick Install
 
 ```bash
 curl -sSf https://raw.githubusercontent.com/neomhr/autoclay/main/install.sh | bash
-clay setup
+clay-cpl setup
 ```
 
 Manual install:
 
 ```bash
-git clone https://github.com/neomhr/autoclay.git
-cd autoclay
+git clone https://github.com/neomhr/autoclay.git clay-cpl
+cd clay-cpl
 pip install -e .
-clay setup
+clay-cpl setup
 ```
 
 Update:
 
 ```bash
-clay update
+clay-cpl update
 ```
 
 ## Setup
 
 ```bash
-clay setup
-clay auth status
+clay-cpl setup
+clay-cpl auth status
 ```
 
 You can also set credentials directly:
@@ -39,14 +41,14 @@ export CLAY_PASSWORD=yourpassword
 export CLAY_WORKSPACE_ID=your_workspace_id
 ```
 
-`CLAY_WORKSPACE_ID` can also come from `~/.autoclay/credentials.json`. Session cookies are cached in `~/.autoclay/session.json`.
+`CLAY_WORKSPACE_ID` can also come from `~/.clay-cpl/credentials.json`. Session cookies are cached in `~/.clay-cpl/session.json`.
 
 ## Commands
 
 ```bash
-clay companies search --countries "United States" --industries "Software Development" --limit 25 --output json
-clay people search --domains openai.com --title-keywords "Engineer" --limit 25 --output csv -f people.csv
-clay jobs search --domains openai.com --title-keywords "Engineer" --limit 25 --output sqlite -f jobs.db
+clay-cpl companies search --countries "United States" --industries "Software Development" --limit 25 --output json
+clay-cpl people search --domains openai.com --title-keywords "Engineer" --limit 25 --output csv -f people.csv
+clay-cpl jobs search --domains openai.com --title-keywords "Engineer" --limit 25 --output sqlite -f jobs.db
 ```
 
 All three search commands support:
@@ -76,12 +78,10 @@ JSON output is entity-shaped:
 
 SQLite output writes to `clay_companies`, `clay_people`, and `clay_jobs`.
 
-## People Search Compatibility
-
-Existing people-search flags still work:
+## People Search
 
 ```bash
-clay people search \
+clay-cpl people search \
   --domains "openai.com,anthropic.com" \
   --title-keywords "Engineer,Developer Advocate" \
   --exclude-titles "Intern" \
@@ -92,7 +92,7 @@ clay people search \
   --cleanup
 ```
 
-Current Clay schema flags are also exposed by exact input name, converted to kebab case, for example:
+Current Clay schema flags are exposed by exact input name, converted to kebab case, for example:
 
 ```bash
 --company-identifier openai.com
@@ -104,21 +104,21 @@ Current Clay schema flags are also exposed by exact input name, converted to keb
 
 ## Company Search
 
-Companies expose all current Clay source inputs as typed flags, including country, type, size, funding, revenue, headcount, industry, description, location, AI-derived industry/business filters, technographics, domain flags, and limit.
+Companies expose the current Clay source inputs as typed flags, including country, type, size, funding, revenue, headcount, industry, description, location, AI-derived industry and business filters, technographics, domain flags, and limit.
 
 Examples:
 
 ```bash
-clay companies search --countries Germany --company-sizes "51-200,201-500" --industries "Software Development"
-clay companies search --semantic-description "B2B SaaS companies selling to HR teams" --limit 50 --output json
+clay-cpl companies search --countries Germany --company-sizes "51-200,201-500" --industries "Software Development"
+clay-cpl companies search --semantic-description "B2B SaaS companies selling to HR teams" --limit 50 --output json
 ```
 
 ## Job Search
 
-Jobs expose all current Clay source inputs:
+Jobs expose the current Clay source inputs:
 
 ```bash
-clay jobs search \
+clay-cpl jobs search \
   --domains openai.com \
   --title-keywords Engineer \
   --locations "San Francisco" \
@@ -131,8 +131,8 @@ clay jobs search \
 People and jobs can start from an existing company table by extracting domains:
 
 ```bash
-clay jobs search --from-company-table t_xxx --company-domain-field Domain --title-keywords Engineer
-clay people search --from-company-table t_xxx --company-domain-field Domain --title-keywords CEO
+clay-cpl jobs search --from-company-table t_xxx --company-domain-field Domain --title-keywords Engineer
+clay-cpl people search --from-company-table t_xxx --company-domain-field Domain --title-keywords CEO
 ```
 
 Outputs include `source_company_table_id` and `source_company_domain` when this join path is used.
@@ -140,36 +140,8 @@ Outputs include `source_company_table_id` and `source_company_domain` when this 
 ## Table Management
 
 ```bash
-clay table list
-clay table info <table_id>
-clay table count <table_id>
-clay table delete <table_id>
-```
-
-## SDK Usage
-
-```python
-from autoclay import ClayClient, CompanySearch, PeopleSearch, JobSearch, SearchFilters
-
-client = ClayClient()
-
-companies = CompanySearch(client).search(
-    filters=SearchFilters(country_names=["United States"], industries=["Software Development"]),
-    limit=10,
-    mode="preview",
-)
-
-people = PeopleSearch(client).search(
-    ["openai.com"],
-    filters=SearchFilters(job_title_keywords=["Engineer"]),
-    limit=10,
-    mode="preview",
-)
-
-jobs = JobSearch(client).search(
-    ["openai.com"],
-    filters=SearchFilters(job_title_keywords=["Engineer"]),
-    limit=10,
-    mode="preview",
-)
+clay-cpl table list
+clay-cpl table info <table_id>
+clay-cpl table count <table_id>
+clay-cpl table delete <table_id>
 ```
