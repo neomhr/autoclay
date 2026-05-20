@@ -1,6 +1,6 @@
-# autoclay
+# Clay Python SDK
 
-CLI for Clay's People Search API. Zero external dependencies.
+Composable Python SDK and CLI for Clay's internal Companies, People, Jobs source APIs. Stdlib only.
 
 ## Quick Install
 
@@ -9,9 +9,7 @@ curl -sSf https://raw.githubusercontent.com/neomhr/autoclay/main/install.sh | ba
 clay setup
 ```
 
-This clones the repo to `~/.autoclay/src/`, installs the `clay` command, and links a Claude Code skill so Claude can use the CLI from any directory.
-
-### Manual Install
+Manual install:
 
 ```bash
 git clone https://github.com/neomhr/autoclay.git
@@ -20,7 +18,7 @@ pip install -e .
 clay setup
 ```
 
-### Update
+Update:
 
 ```bash
 clay update
@@ -30,232 +28,148 @@ clay update
 
 ```bash
 clay setup
+clay auth status
 ```
 
-This prompts for your Clay email/password, verifies authentication, and stores credentials in `~/.autoclay/credentials.json` (permissions `0600`). The session cookie is cached in `~/.autoclay/session.json` and shared across parallel processes (23h TTL, auto-refreshes).
-
-Alternatively, set environment variables (these override the credentials file):
+You can also set credentials directly:
 
 ```bash
 export CLAY_EMAIL=you@example.com
 export CLAY_PASSWORD=yourpassword
-export CLAY_WORKSPACE_ID=123456
+export CLAY_WORKSPACE_ID=your_workspace_id
 ```
 
-Verify auth:
+`CLAY_WORKSPACE_ID` can also come from `~/.autoclay/credentials.json`. Session cookies are cached in `~/.autoclay/session.json`.
+
+## Commands
 
 ```bash
-clay auth login
+clay companies search --countries "United States" --industries "Software Development" --limit 25 --output json
+clay people search --domains openai.com --title-keywords "Engineer" --limit 25 --output csv -f people.csv
+clay jobs search --domains openai.com --title-keywords "Engineer" --limit 25 --output sqlite -f jobs.db
 ```
 
-## CLI Reference
-
-### People Search
+All three search commands support:
 
 ```bash
-# Basic search (auto mode: preview if limit <= 50, else full)
-clay people search --domains acme.com
-
-# No domains — search across all companies matching filters
-clay people search --title-keywords "CEO" --countries "United States"
-
-# Multi-domain
-clay people search --domains "acme.com,example.com,startup.io"
-
-# From CSV file (first column = domains)
-clay people search --domains-file companies.csv
-
-# Full mode (creates Clay table, polls, extracts all records)
-clay people search --domains acme.com --mode full
-
-# Preview mode (max 50 results, no table creation)
-clay people search --domains acme.com --mode preview
-
-# Limit total results and per-company results
-clay people search --domains "acme.com,example.com" --limit 500 --limit-per-company 100
-
-# Output formats
-clay people search --domains acme.com --output csv          # default
-clay people search --domains acme.com --output json
-clay people search --domains acme.com --output sqlite
-clay people search --domains acme.com -f results.csv
-
-# Delete Clay table after extraction
-clay people search --domains acme.com --mode full --cleanup
-
-# Quiet mode
-clay people search --domains acme.com -q
+--mode preview|full|auto
+--limit N
+--output csv|json|sqlite
+--output-file PATH
+--cleanup
+--quiet
+--inputs-json '{"exact":"Clay inputs"}'
+--inputs-file inputs.json
 ```
 
-### Filter Flags
+`--inputs-json` and `--inputs-file` pass exact raw Clay source inputs. When used, typed filters are ignored and only mode, output, cleanup, and client-side limiting remain CLI-controlled.
 
-#### Seniority & Job Function
+## Entity Outputs
 
-```bash
---seniority owner,partner,c-suite,vp,director,head,manager,senior,entry,assistant,intern,freelance,certified
---functions "Engineering,Sales,Human Resources and Recruiting"
+JSON output is entity-shaped:
+
+```json
+{ "count": 1, "companies": [] }
+{ "count": 1, "people": [] }
+{ "count": 1, "jobs": [] }
 ```
 
-#### Title Filters
+SQLite output writes to `clay_companies`, `clay_people`, and `clay_jobs`.
 
-```bash
---title-keywords "CEO,CTO,VP Engineering"
---exclude-titles "Intern,Assistant"
---title-mode smart|contain|exact     # default: smart
-```
+## People Search Compatibility
 
-#### Location Filters
-
-```bash
---countries "United States,Germany"
---countries-exclude "China"
---states "California,New York"
---states-exclude "Texas"
---cities "San Francisco,Berlin"
---cities-exclude "Houston"
---regions "EMEA,APAC"
---regions-exclude "LATAM"
-```
-
-#### Company Filters
-
-```bash
---company-sizes "1,2-10,11-50,51-200,201-500,501-1000,1001-5000,5001-10000,10001+"
---industries "Software Development,Accounting"
---industries-exclude "Mining"
---company-keywords "SaaS,AI"
---company-keywords-exclude "nonprofit"
-```
-
-#### Profile & Keyword Filters
-
-```bash
---headline-keywords "growth,scaling"
---about-keywords "entrepreneur"
---profile-keywords "python,machine learning"
---job-description-keywords "team lead"
---certification-keywords "PMP,AWS"
---school-names "MIT,Stanford"
-```
-
-#### LinkedIn Activity Filters
-
-```bash
---min-connections 500
---max-connections 5000
---min-followers 1000
---max-followers 50000
---min-experience 3
---max-experience 10
-```
-
-#### Role Tenure
-
-```bash
---min-role-months 6      # at least 6 months in current role
---max-role-months 24     # at most 24 months in current role
-```
-
-#### Role Date Range
-
-```bash
---role-range-start-month 3    # role start date filter (months ago)
---role-range-end-month 12     # role end date filter (months ago)
-```
-
-#### Limits
-
-```bash
---limit 500              # total max results across all companies (default: plan cap ~25k)
---limit-per-company 50   # max results per company (default: no cap)
-```
-
-#### Other
-
-```bash
---languages "English,German"
---names "John,Jane"
---include-past            # include people who previously worked at company
-```
-
-### Full Example
+Existing people-search flags still work:
 
 ```bash
 clay people search \
-  --domains github.com \
-  --seniority vp,director \
+  --domains "openai.com,anthropic.com" \
+  --title-keywords "Engineer,Developer Advocate" \
+  --exclude-titles "Intern" \
   --countries "United States" \
-  --company-sizes "51-200,201-500" \
-  --industries "Software Development" \
-  --title-keywords "Engineering,Product" \
-  --headline-keywords "growth" \
-  --min-connections 500 \
+  --company-sizes "51-200,201-500,501-1000" \
   --mode full \
-  --limit-per-company 200 \
-  -f github_leaders.csv \
+  --limit 100 \
   --cleanup
 ```
 
-### Keyword Expansion
+Current Clay schema flags are also exposed by exact input name, converted to kebab case, for example:
 
 ```bash
-# Expand seed terms with related keywords from Clay
-clay keywords expand --terms "director,leader"
-clay keywords expand --terms "machine learning,AI" --output json
+--company-identifier openai.com
+--job-title-seniority-levels-v2 executive,manager
+--job-title-include-past-experiences true
+--job-description-include-past-experiences true
+--limit-per-company 3
 ```
 
-### Table Management
+## Company Search
+
+Companies expose all current Clay source inputs as typed flags, including country, type, size, funding, revenue, headcount, industry, description, location, AI-derived industry/business filters, technographics, domain flags, and limit.
+
+Examples:
 
 ```bash
-clay table list                    # list all tables
-clay table info <table_id>         # table details
-clay table count <table_id>        # record count
-clay table delete <table_id>       # delete table
+clay companies search --countries Germany --company-sizes "51-200,201-500" --industries "Software Development"
+clay companies search --semantic-description "B2B SaaS companies selling to HR teams" --limit 50 --output json
 ```
 
-### Authentication
+## Job Search
+
+Jobs expose all current Clay source inputs:
 
 ```bash
-clay auth login     # login and verify session
-clay auth status    # show current auth status
+clay jobs search \
+  --domains openai.com \
+  --title-keywords Engineer \
+  --locations "San Francisco" \
+  --employment-type "Full-time" \
+  --max-num-days-since-posted 30
 ```
 
-## How it works
+## Company Table Joins
 
-- **Preview mode** — fast, no credits, max 50 results. Good for testing filters.
-- **Full mode** — creates a Clay table, polls for completion, extracts all records. Use for production searches.
-- **Auto mode** (default) — preview if limit <= 50, full otherwise.
+People and jobs can start from an existing company table by extracting domains:
 
-Credentials are stored in `~/.autoclay/credentials.json`. The session cookie is cached in `~/.autoclay/session.json` and auto-refreshes every 23 hours. Parallel processes share the cached session.
+```bash
+clay jobs search --from-company-table t_xxx --company-domain-field Domain --title-keywords Engineer
+clay people search --from-company-table t_xxx --company-domain-field Domain --title-keywords CEO
+```
 
-## Enum Values
+Outputs include `source_company_table_id` and `source_company_domain` when this join path is used.
 
-### Seniority Levels
+## Table Management
 
-`owner`, `partner`, `c-suite`, `vp`, `director`, `head`, `manager`, `senior`, `entry`, `assistant`, `intern`, `freelance`, `certified`
+```bash
+clay table list
+clay table info <table_id>
+clay table count <table_id>
+clay table delete <table_id>
+```
 
-### Job Functions
+## SDK Usage
 
-`Administrative`, `Agriculture, Horticulture, and the Outdoors`, `Arts and Design`, `Business Development`, `Community and Social Services`, `Construction, Extraction, and Architecture`, `Customer Success and Support`, `Education`, `Engineering`, `Finance`, `Healthcare`, `Hospitality, Food, and Tourism`, `Human Resources and Recruiting`, `Information Technology (IT) and Computer Science`, `Legal, Compliance, and Public Safety`, `Maintenance, Repair, and Installation`, `Manufacturing and Production`, `Marketing and Public Relations`, `Military`, `Performing Arts`, `Personal Services`, `Sales`, `Science and Research`, `Social Analysis and Planning`, `Student`
+```python
+from autoclay import ClayClient, CompanySearch, PeopleSearch, JobSearch, SearchFilters
 
-### Company Sizes
+client = ClayClient()
 
-`1`, `2-10`, `11-50`, `51-200`, `201-500`, `501-1000`, `1001-5000`, `5001-10000`, `10001+`
+companies = CompanySearch(client).search(
+    filters=SearchFilters(country_names=["United States"], industries=["Software Development"]),
+    limit=10,
+    mode="preview",
+)
 
-Clay's canonical form uses comma-grouped thousands (`501-1,000`, `10,001+`). The CLI accepts either form and normalizes internally — the comma-free form shown above is recommended for `--company-sizes` since it avoids ambiguity with the `,` separator.
+people = PeopleSearch(client).search(
+    ["openai.com"],
+    filters=SearchFilters(job_title_keywords=["Engineer"]),
+    limit=10,
+    mode="preview",
+)
 
-### Title Modes
-
-`smart` (default — fuzzy match), `contain` (substring match), `exact` (exact string match)
-
-## Limitations
-
-- **Authentication:** Uses session cookies, not API keys. Sessions expire and require re-login.
-- **Rate limits:** 25,000 people search lookups per account. Preview limited to 50 results.
-- **No server-side exclusion:** De-duplication against previously fetched records must be handled locally (e.g., via SQLite output with dedup on LinkedIn URL).
-- **Industries list:** Uses LinkedIn's industry taxonomy (~200+ values). Pass exact LinkedIn industry name strings.
-- **Countries list:** Standard world country names (~240). Pass full English country names.
-
-## License
-
-MIT
+jobs = JobSearch(client).search(
+    ["openai.com"],
+    filters=SearchFilters(job_title_keywords=["Engineer"]),
+    limit=10,
+    mode="preview",
+)
+```

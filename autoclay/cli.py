@@ -1,121 +1,299 @@
-"""Clay SDK CLI — argparse dispatcher.
-
-Usage:
-    clay people search --domains acme.com [options]
-    clay table list
-    clay auth login
-"""
+"""Clay SDK CLI - argparse dispatcher."""
 
 import argparse
 import csv
 import getpass
 import json
+import subprocess
 import sys
 from datetime import datetime
-
-import subprocess
+from pathlib import Path
 
 from .auth import SessionManager
 from .client import ClayClient
 from .config import AUTOCLAY_DIR, CREDENTIALS_FILE, save_credentials
 from .exceptions import ClayAuthError
 from .models import SearchFilters
-from .search import PeopleSearch, KeywordExpander
-from .tables import TableManager
-from .output import write_csv, write_sqlite, write_json
+from .output import write_csv, write_json, write_sqlite
+from .search import CompanySearch, JobSearch, KeywordExpander, PeopleSearch
+from .tables import RecordFetcher, TableManager
 
 
-BANNER = r"""
-       █████  ██    ██ ████████  ██████   ██████ ██       █████  ██    ██
-      ██   ██ ██    ██    ██    ██    ██ ██      ██      ██   ██  ██  ██
-      ███████ ██    ██    ██    ██    ██ ██      ██      ███████   ████
-      ██   ██ ██    ██    ██    ██    ██ ██      ██      ██   ██    ██
-      ██   ██  ██████     ██     ██████   ██████ ███████ ██   ██    ██
-"""
+SEARCH_CLASSES = {
+    "companies": CompanySearch,
+    "people": PeopleSearch,
+    "jobs": JobSearch,
+}
 
-TAGLINE = "      Built by Neo Mohr"
+FIELD_TYPES = {
+    "companies": {
+        "country_names": "list",
+        "country_names_exclude": "list",
+        "types": "list",
+        "sizes": "list",
+        "funding_amounts": "list",
+        "annual_revenues": "list",
+        "minimum_member_count": "int",
+        "maximum_member_count": "int",
+        "industries": "list",
+        "industries_exclude": "list",
+        "description_keywords": "list",
+        "description_keywords_exclude": "list",
+        "locations": "list",
+        "locations_exclude": "list",
+        "location_cities_include": "list",
+        "location_cities_exclude": "list",
+        "location_regions_include": "list",
+        "location_regions_exclude": "list",
+        "location_postal_codes_include": "list",
+        "location_postal_codes_exclude": "list",
+        "location_states_include": "list",
+        "location_states_exclude": "list",
+        "location_headquarters_only": "bool",
+        "semantic_description": "str",
+        "derived_industries": "list",
+        "derived_subindustries": "list",
+        "derived_subindustries_exclude": "list",
+        "derived_revenue_streams": "list",
+        "derived_business_types": "list",
+        "technographics_vendors": "list",
+        "technographics_products": "list",
+        "technographics_main_categories": "list",
+        "technographics_parent_categories": "list",
+        "has_resolved_domain": "list",
+        "resolved_domain_is_live": "list",
+        "resolved_domain_redirects": "list",
+    },
+    "people": {
+        "company_identifier": "list",
+        "include_past_experiences": "bool",
+        "job_title_seniority_levels": "list",
+        "job_title_seniority_levels_v2": "list",
+        "job_title_seniority_match_mode": "str",
+        "job_title_seniority_floor_level": "str",
+        "job_title_keywords": "list",
+        "job_title_exclude_keywords": "list",
+        "job_title_include_past_experiences": "bool",
+        "job_title_mode": "str",
+        "job_functions": "list",
+        "current_role_min_months_since_start_date": "int",
+        "current_role_max_months_since_start_date": "int",
+        "role_range_start_month": "int",
+        "role_range_end_month": "int",
+        "locations": "list",
+        "company_description_keywords": "list",
+        "company_description_keywords_exclude": "list",
+        "company_sizes": "list",
+        "company_annual_revenues": "list",
+        "company_industries_include": "list",
+        "company_industries_exclude": "list",
+        "locations_exclude": "list",
+        "location_cities_include": "list",
+        "location_cities_exclude": "list",
+        "location_states_include": "list",
+        "location_states_exclude": "list",
+        "location_countries_include": "list",
+        "location_countries_exclude": "list",
+        "location_regions_include": "list",
+        "location_regions_exclude": "list",
+        "headline_keywords": "list",
+        "about_keywords": "list",
+        "profile_keywords": "list",
+        "job_description_keywords": "list",
+        "job_description_include_past_experiences": "bool",
+        "languages": "list",
+        "school_names": "list",
+        "certification_keywords": "list",
+        "names": "list",
+        "experience_count": "int",
+        "max_experience_count": "int",
+        "follower_count": "int",
+        "max_follower_count": "int",
+        "connection_count": "int",
+        "max_connection_count": "int",
+        "limit_per_company": "int",
+    },
+    "jobs": {
+        "company_identifier": "list",
+        "job_title_keywords": "list",
+        "job_title_exclude_keywords": "list",
+        "locations": "list",
+        "locations_exclude": "list",
+        "job_description_keywords": "list",
+        "has_recruiter": "bool",
+        "employment_type": "list",
+        "seniority": "list",
+        "max_num_days_since_posted": "int",
+        "min_num_days_since_posted": "int",
+    },
+}
+
+FILTER_ATTRS = {
+    "company_identifier": "company_identifier",
+    "include_past_experiences": "include_past_experiences",
+    "job_title_seniority_levels": "seniority_levels",
+    "job_title_seniority_levels_v2": "seniority_levels_v2",
+    "job_title_seniority_match_mode": "seniority_match_mode",
+    "job_title_seniority_floor_level": "seniority_floor_level",
+    "job_title_keywords": "job_title_keywords",
+    "job_title_exclude_keywords": "job_title_exclude_keywords",
+    "job_title_include_past_experiences": "job_title_include_past_experiences",
+    "job_title_mode": "job_title_mode",
+    "job_functions": "job_functions",
+    "current_role_min_months_since_start_date": "current_role_min_months",
+    "current_role_max_months_since_start_date": "current_role_max_months",
+    "role_range_start_month": "role_range_start_month",
+    "role_range_end_month": "role_range_end_month",
+    "locations": "locations",
+    "locations_exclude": "locations_exclude",
+    "location_cities_include": "location_cities_include",
+    "location_cities_exclude": "location_cities_exclude",
+    "location_states_include": "location_states_include",
+    "location_states_exclude": "location_states_exclude",
+    "location_countries_include": "country_names",
+    "location_countries_exclude": "country_names_exclude",
+    "location_regions_include": "location_regions_include",
+    "location_regions_exclude": "location_regions_exclude",
+    "company_description_keywords": "company_description_keywords",
+    "company_description_keywords_exclude": "company_description_keywords_exclude",
+    "company_sizes": "company_sizes",
+    "company_annual_revenues": "company_annual_revenues",
+    "company_industries_include": "company_industries_include",
+    "company_industries_exclude": "company_industries_exclude",
+    "headline_keywords": "headline_keywords",
+    "about_keywords": "about_keywords",
+    "profile_keywords": "profile_keywords",
+    "job_description_keywords": "job_description_keywords",
+    "job_description_include_past_experiences": "job_description_include_past_experiences",
+    "languages": "languages",
+    "school_names": "school_names",
+    "certification_keywords": "certification_keywords",
+    "names": "names",
+    "experience_count": "experience_count",
+    "max_experience_count": "max_experience_count",
+    "follower_count": "follower_count",
+    "max_follower_count": "max_follower_count",
+    "connection_count": "connection_count",
+    "max_connection_count": "max_connection_count",
+    "limit_per_company": "limit_per_company",
+}
+
+ALIASES = {
+    "people": {
+        "domains": ("company_identifier", "list"),
+        "seniority": ("job_title_seniority_levels", "list"),
+        "functions": ("job_functions", "list"),
+        "title_keywords": ("job_title_keywords", "list"),
+        "exclude_titles": ("job_title_exclude_keywords", "list"),
+        "title_mode": ("job_title_mode", "str"),
+        "countries": ("location_countries_include", "list"),
+        "countries_exclude": ("location_countries_exclude", "list"),
+        "states": ("location_states_include", "list"),
+        "states_exclude": ("location_states_exclude", "list"),
+        "cities": ("location_cities_include", "list"),
+        "cities_exclude": ("location_cities_exclude", "list"),
+        "regions": ("location_regions_include", "list"),
+        "regions_exclude": ("location_regions_exclude", "list"),
+        "industries": ("company_industries_include", "list"),
+        "industries_exclude": ("company_industries_exclude", "list"),
+        "company_keywords": ("company_description_keywords", "list"),
+        "company_keywords_exclude": ("company_description_keywords_exclude", "list"),
+        "include_past": ("include_past_experiences", "bool"),
+        "min_connections": ("connection_count", "int"),
+        "max_connections": ("max_connection_count", "int"),
+        "min_followers": ("follower_count", "int"),
+        "max_followers": ("max_follower_count", "int"),
+        "min_experience": ("experience_count", "int"),
+        "max_experience": ("max_experience_count", "int"),
+        "min_role_months": ("current_role_min_months_since_start_date", "int"),
+        "max_role_months": ("current_role_max_months_since_start_date", "int"),
+    },
+    "companies": {
+        "countries": ("country_names", "list"),
+        "countries_exclude": ("country_names_exclude", "list"),
+        "company_types": ("types", "list"),
+        "company_sizes": ("sizes", "list"),
+        "industries_include": ("industries", "list"),
+        "industries_exclude_alias": ("industries_exclude", "list"),
+    },
+    "jobs": {
+        "domains": ("company_identifier", "list"),
+        "title_keywords": ("job_title_keywords", "list"),
+        "exclude_titles": ("job_title_exclude_keywords", "list"),
+    },
+}
 
 
 def _progress(msg):
     print(msg, file=sys.stderr)
 
 
-# ---------------------------------------------------------------------------
-# People commands
-# ---------------------------------------------------------------------------
+def cmd_entity_search(args):
+    entity = args.entity
+    filters = _build_filters(args, entity)
+    identifiers = _load_identifiers(args, entity)
 
-def cmd_people_search(args):
-    """Run people search."""
-    domains = _load_domains(args)
-    filters = _build_filters(args)
+    if getattr(args, "from_company_table", None):
+        domains = _domains_from_company_table(
+            args.from_company_table,
+            args.company_domain_field,
+        )
+        identifiers.extend(domains)
+        filters.company_identifier = identifiers
+
     client = ClayClient()
-    ps = PeopleSearch(client)
-
+    searcher = SEARCH_CLASSES[entity](client)
     quiet = getattr(args, "quiet", False)
     on_progress = (lambda m: None) if quiet else _progress
 
     if not quiet:
-        _progress("Clay People Search")
+        _progress(f"Clay {entity.title()} Search")
         _progress(f"  Mode: {args.mode}")
-        if domains:
-            _progress(f"  Domains: {len(domains)} ({', '.join(domains[:3])}{'...' if len(domains) > 3 else ''})")
-        else:
-            _progress("  Domains: all (no filter)")
-        _progress(f"  Limit: {args.limit or 'plan cap'}")
-        if args.limit_per_company:
-            _progress(f"  Limit per company: {args.limit_per_company}")
+        _progress(f"  Limit: {args.limit if args.limit is not None else 'source default'}")
+        if identifiers:
+            _progress(f"  Company identifiers: {len(identifiers)}")
+        if filters.raw_inputs is not None:
+            _progress("  Inputs: raw Clay payload")
 
-    if args.mode == "full" and len(domains) > 1:
-        # Full mode: batch domains into chunks for Clay table creation
-        batch_size = args.batch_size
-        all_people = []
-        chunks = [domains[i:i + batch_size] for i in range(0, len(domains), batch_size)]
-        for chunk_idx, chunk in enumerate(chunks):
-            start = chunk_idx * batch_size + 1
-            end = start + len(chunk) - 1
-            if not quiet:
-                if batch_size == 1:
-                    _progress(f"[{start}/{len(domains)}] {chunk[0]}")
-                else:
-                    _progress(f"[{start}-{end}/{len(domains)}] {', '.join(chunk[:3])}{'...' if len(chunk) > 3 else ''}")
-            result = ps.search(
-                chunk,
-                filters=filters,
-                limit=args.limit,
-                limit_per_company=args.limit_per_company,
-                mode="full",
-                cleanup=args.cleanup,
-                on_progress=on_progress,
-            )
-            all_people.extend(result.people)
-            if not quiet:
-                _progress(f"  Total so far: {len(all_people)}")
-    else:
-        result = ps.search(
-            domains,
-            filters=filters,
-            limit=args.limit,
-            limit_per_company=args.limit_per_company,
-            mode=args.mode,
-            cleanup=args.cleanup,
-            on_progress=on_progress,
-        )
-        all_people = result.people
+    result = searcher.search(
+        identifiers,
+        filters=filters,
+        limit=args.limit,
+        mode=args.mode,
+        cleanup=args.cleanup,
+        on_progress=on_progress,
+    )
+    records = result.records
+    if filters.raw_inputs is not None and args.limit is not None:
+        records = records[: args.limit]
+    if getattr(args, "from_company_table", None):
+        for record in records:
+            record.source_company_table_id = args.from_company_table
+            if not record.source_company_domain:
+                record.source_company_domain = getattr(record, "company_domain", "")
 
-    _write_output(all_people, args)
-
+    _write_output(records, args, entity)
     if not quiet:
-        _progress(f"\nDone. {len(all_people)} total records.")
+        _progress(f"\nDone. {len(records)} total records.")
 
 
-# ---------------------------------------------------------------------------
-# Table commands
-# ---------------------------------------------------------------------------
+def cmd_people_search(args):
+    args.entity = "people"
+    return cmd_entity_search(args)
+
+
+def cmd_company_search(args):
+    args.entity = "companies"
+    return cmd_entity_search(args)
+
+
+def cmd_job_search(args):
+    args.entity = "jobs"
+    return cmd_entity_search(args)
+
 
 def cmd_table_list(args):
-    client = ClayClient()
-    tm = TableManager(client)
-    tables = tm.list_tables()
+    tables = TableManager(ClayClient()).list_tables()
     if not tables:
         print("No tables found.")
         return
@@ -124,9 +302,7 @@ def cmd_table_list(args):
 
 
 def cmd_table_info(args):
-    client = ClayClient()
-    tm = TableManager(client)
-    t = tm.get_table(args.table_id)
+    t = TableManager(ClayClient()).get_table(args.table_id)
     print(f"Table: {t.name}")
     print(f"  ID: {t.table_id}")
     print(f"  View: {t.view_id}")
@@ -135,22 +311,13 @@ def cmd_table_info(args):
 
 
 def cmd_table_count(args):
-    client = ClayClient()
-    tm = TableManager(client)
-    count = tm.get_record_count(args.table_id)
-    print(count)
+    print(TableManager(ClayClient()).get_record_count(args.table_id))
 
 
 def cmd_table_delete(args):
-    client = ClayClient()
-    tm = TableManager(client)
-    tm.delete_table(args.table_id)
+    TableManager(ClayClient()).delete_table(args.table_id)
     print(f"Deleted {args.table_id}")
 
-
-# ---------------------------------------------------------------------------
-# Auth commands
-# ---------------------------------------------------------------------------
 
 def cmd_auth_login(args):
     client = ClayClient()
@@ -167,19 +334,12 @@ def cmd_auth_status(args):
     client.session.print_status(file=sys.stdout)
 
 
-# ---------------------------------------------------------------------------
-# Keywords commands
-# ---------------------------------------------------------------------------
-
 def cmd_keywords_expand(args):
-    """Expand keywords using Clay's related-keywords API."""
     terms = [t.strip() for t in args.terms.split(",") if t.strip()]
     if not terms:
         print("ERROR: Provide at least one term via --terms", file=sys.stderr)
         sys.exit(1)
-    client = ClayClient()
-    expander = KeywordExpander(client)
-    related = expander.get_related(terms)
+    related = KeywordExpander(ClayClient()).get_related(terms)
     if args.output == "json":
         print(json.dumps(related, indent=2))
     else:
@@ -187,142 +347,63 @@ def cmd_keywords_expand(args):
             print(kw)
 
 
-# ---------------------------------------------------------------------------
-# Setup
-# ---------------------------------------------------------------------------
-
 def cmd_setup(args):
-    """Interactive setup wizard."""
-    print(BANNER)
-    print(TAGLINE)
     print()
-    print("  ─── Setup ───")
+    print("Clay SDK Setup")
     print()
 
-    # Step 1: Python version check
-    v = sys.version_info
-    if v >= (3, 8):
-        print(f"  Checking Python version... ok  Python {v.major}.{v.minor}.{v.micro}")
-    else:
-        print(f"  Checking Python version... FAIL  Python {v.major}.{v.minor}.{v.micro} (need 3.8+)")
-        sys.exit(1)
-
-    # Step 2: Check existing credentials
     existing_email = None
     if CREDENTIALS_FILE.exists():
         try:
-            creds = json.loads(CREDENTIALS_FILE.read_text())
-            existing_email = creds.get("email")
+            existing_email = json.loads(CREDENTIALS_FILE.read_text()).get("email")
         except (json.JSONDecodeError, OSError):
             pass
 
     if existing_email:
-        print(f"  Found existing credentials ({existing_email})")
-        print()
-        overwrite = input("  Overwrite existing credentials? [y/N] ").strip().lower()
+        overwrite = input(f"Overwrite existing credentials ({existing_email})? [y/N] ").strip().lower()
         if overwrite not in ("y", "yes"):
-            print()
-            print("  Keeping existing credentials. Run 'clay auth status' to check session.")
-            print()
+            print("Keeping existing credentials. Run 'clay auth status' to check session.")
             return
-    else:
-        print("  No existing credentials found")
-
-    # Step 3: Prompt for credentials
-    print()
-    print("  Enter your Clay credentials:")
     try:
-        email = input("    Email: ").strip()
-        password = getpass.getpass("    Password: ")
+        email = input("Email: ").strip()
+        password = getpass.getpass("Password: ")
     except (KeyboardInterrupt, EOFError):
-        print("\n\n  Setup cancelled.")
+        print("\nSetup cancelled.")
         sys.exit(1)
-
     if not email or not password:
-        print("\n  Error: Email and password are required.")
+        print("Error: Email and password are required.", file=sys.stderr)
         sys.exit(1)
-
-    # Step 4: Test authentication
-    print()
-    print("  Authenticating...", end=" ", flush=True)
     session = SessionManager()
     try:
         detected_workspace_id = session.login(email, password)
     except ClayAuthError as e:
-        print("FAIL")
-        print(f"\n  Error: {e}")
-        print("  Credentials NOT saved.")
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    status = session.status()
-    print(f"ok  Logged in (session expires in {status['expires_in']})")
-
-    # Step 5: Prompt for workspace ID
     print()
-    print("  Workspace ID")
-    print("    Find it in your Clay URL: app.clay.com/workspaces/<WORKSPACE_ID>")
     if detected_workspace_id:
-        print(f"    Detected from login: {detected_workspace_id}")
-    print()
-    try:
-        default_label = f" [{detected_workspace_id}]" if detected_workspace_id else ""
-        workspace_id = input(f"    Workspace ID{default_label}: ").strip()
-    except (KeyboardInterrupt, EOFError):
-        print("\n\n  Setup cancelled.")
+        workspace_id = input(f"Workspace ID [{detected_workspace_id}]: ").strip() or detected_workspace_id
+    else:
+        workspace_id = input("Workspace ID: ").strip()
+    if not workspace_id:
+        print("Error: Workspace ID is required.", file=sys.stderr)
         sys.exit(1)
 
-    if not workspace_id:
-        if detected_workspace_id:
-            workspace_id = detected_workspace_id
-        else:
-            print("\n  Error: Workspace ID is required.")
-            sys.exit(1)
-
-    # Step 6: Save to ~/.autoclay/credentials.json
-    print()
-    print(f"  Saving credentials to {CREDENTIALS_FILE}...", end=" ", flush=True)
     save_credentials(email, password, workspace_id)
-    print("ok")
+    print(f"Setup complete. Credentials stored in {CREDENTIALS_FILE}.")
 
-    # Step 7: Success banner
-    print()
-    print("  ─── Setup complete! ───")
-    print()
-    print("  Credentials stored in ~/.autoclay/credentials.json")
-    print("  Session cached in ~/.autoclay/session.json")
-    print()
-    print("  Try it out:")
-    print("    clay people search --domains github.com")
-    print()
-
-
-# ---------------------------------------------------------------------------
-# Update
-# ---------------------------------------------------------------------------
 
 def _find_source_dir():
-    """Find the autoclay source directory.
-
-    Checks, in order:
-    1. ~/.autoclay/src/ (standard install location)
-    2. The directory containing this package (editable/dev install)
-    """
-    from pathlib import Path
-
     standard = AUTOCLAY_DIR / "src"
     if (standard / ".git").is_dir():
         return standard
-
-    # Fallback: this file's parent's parent (repo root)
     pkg_root = Path(__file__).resolve().parent.parent
     if (pkg_root / ".git").is_dir():
         return pkg_root
-
     return None
 
 
 def cmd_update(args):
-    """Pull latest changes from git."""
     src_dir = _find_source_dir()
     if not src_dir:
         print("Error: Cannot find autoclay source directory.", file=sys.stderr)
@@ -332,7 +413,8 @@ def cmd_update(args):
     print(f"Updating from {src_dir}...")
     result = subprocess.run(
         ["git", "-C", str(src_dir), "pull"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         print(f"git pull failed:\n{result.stderr}", file=sys.stderr)
@@ -343,42 +425,17 @@ def cmd_update(args):
         print("Already up to date.")
     else:
         print(output)
-        print("\nUpdated successfully. Changes are live (editable install).")
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _load_domains(args):
-    if args.domains:
-        return [d.strip() for d in args.domains.split(",") if d.strip()]
-    if args.domains_file:
-        domains = []
-        with open(args.domains_file) as f:
-            reader = csv.reader(f)
-            for row in reader:
-                if row and row[0].strip() and not row[0].startswith("#"):
-                    val = row[0].strip()
-                    if "." in val and not val.lower().startswith("domain"):
-                        domains.append(val)
-        return domains
-    # No domains specified — search across all sources
-    return []
+        print("\nUpdated successfully. Changes are live.")
 
 
 def _split(val):
-    """Split a comma-separated string into a trimmed list."""
-    return [v.strip() for v in val.split(",") if v.strip()]
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return val
+    return [v.strip() for v in str(val).split(",") if v.strip()]
 
 
-# Clay's canonical company_sizes enum uses comma-grouped thousands in labels,
-# which collides with the comma separator used by --company-sizes. We accept
-# either form on input and normalize to Clay's canonical form before sending.
-_COMPANY_SIZE_CANONICAL = [
-    "1", "2-10", "11-50", "51-200", "201-500",
-    "501-1,000", "1,001-5,000", "5,001-10,000", "10,001+",
-]
 _COMPANY_SIZE_TOKENS = [
     "10,001+", "5,001-10,000", "1,001-5,000", "501-1,000",
     "10001+", "5001-10000", "1001-5000", "501-1000",
@@ -393,322 +450,290 @@ _COMPANY_SIZE_FREE_TO_CANONICAL = {
 
 
 def _parse_company_sizes(val):
-    """Parse --company-sizes, accepting comma-free ('501-1000,1001-5000') or
-    Clay's canonical comma form ('501-1,000,1,001-5,000'). Returns canonical tokens."""
-    s = val.strip()
+    """Parse Clay company size labels, accepting comma-free thousands."""
+    s = str(val).strip()
     out = []
     while s:
-        for tok in _COMPANY_SIZE_TOKENS:
-            if s.startswith(tok):
-                out.append(_COMPANY_SIZE_FREE_TO_CANONICAL.get(tok, tok))
-                s = s[len(tok):].lstrip(", \t")
+        for token in _COMPANY_SIZE_TOKENS:
+            if s.startswith(token):
+                out.append(_COMPANY_SIZE_FREE_TO_CANONICAL.get(token, token))
+                s = s[len(token):].lstrip(", \t")
                 break
         else:
-            raise SystemExit(
-                f"error: --company-sizes: unrecognized bucket near {s!r}. "
-                f"Valid: {', '.join(_COMPANY_SIZE_CANONICAL)} "
-                f"(comma-free form also accepted, e.g. '501-1000')"
-            )
+            raise SystemExit(f"error: unrecognized company size near {s!r}")
     return out
 
 
-def _build_filters(args):
+def _parse_bool(val):
+    if isinstance(val, bool):
+        return val
+    return str(val).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def _coerce(raw, kind):
+    if raw is None:
+        return None
+    if kind == "list":
+        return _split(raw)
+    if kind == "int":
+        return int(raw)
+    if kind == "bool":
+        return _parse_bool(raw)
+    return raw
+
+
+def _load_raw_inputs(args):
+    if args.inputs_json and args.inputs_file:
+        raise SystemExit("error: use only one of --inputs-json or --inputs-file")
+    if args.inputs_json:
+        return json.loads(args.inputs_json)
+    if args.inputs_file:
+        with open(args.inputs_file) as f:
+            return json.load(f)
+    return None
+
+
+def _build_filters(args, entity="people"):
+    raw_inputs = _load_raw_inputs(args)
+    if raw_inputs is not None:
+        return SearchFilters(raw_inputs=raw_inputs)
+
     kw = {}
+    for field, kind in FIELD_TYPES[entity].items():
+        if field == "limit":
+            continue
+        attr = FILTER_ATTRS.get(field, field)
+        raw = getattr(args, field, None)
+        if raw is not None:
+            kw[attr] = _parse_company_sizes(raw) if field in ("company_sizes", "sizes") else _coerce(raw, kind)
 
-    # Seniority & functions
-    if args.seniority:
-        kw["seniority_levels"] = _split(args.seniority)
-    if args.functions:
-        kw["job_functions"] = _split(args.functions)
+    for alias, (field, kind) in ALIASES.get(entity, {}).items():
+        raw = getattr(args, alias, None)
+        if raw is not None and raw is not False:
+            attr = FILTER_ATTRS.get(field, field)
+            kw[attr] = _parse_company_sizes(raw) if field in ("company_sizes", "sizes") else _coerce(raw, kind)
 
-    # Title
-    if args.title_keywords:
-        kw["job_title_keywords"] = _split(args.title_keywords)
-    if args.exclude_titles:
-        kw["job_title_exclude_keywords"] = _split(args.exclude_titles)
-    if args.title_mode != "smart":
+    if entity == "people" and getattr(args, "title_mode", None):
         kw["job_title_mode"] = args.title_mode
-
-    # Location
-    if args.countries:
-        kw["countries_include"] = _split(args.countries)
-    if args.countries_exclude:
-        kw["countries_exclude"] = _split(args.countries_exclude)
-    if args.states:
-        kw["states_include"] = _split(args.states)
-    if args.states_exclude:
-        kw["states_exclude"] = _split(args.states_exclude)
-    if args.cities:
-        kw["cities_include"] = _split(args.cities)
-    if args.cities_exclude:
-        kw["cities_exclude"] = _split(args.cities_exclude)
-    if args.regions:
-        kw["regions_include"] = _split(args.regions)
-    if args.regions_exclude:
-        kw["regions_exclude"] = _split(args.regions_exclude)
-
-    # Company
-    if args.company_sizes:
-        kw["company_sizes"] = _parse_company_sizes(args.company_sizes)
-    if args.industries:
-        kw["company_industries_include"] = _split(args.industries)
-    if args.industries_exclude:
-        kw["company_industries_exclude"] = _split(args.industries_exclude)
-    if args.company_keywords:
-        kw["company_description_keywords"] = _split(args.company_keywords)
-    if args.company_keywords_exclude:
-        kw["company_description_keywords_exclude"] = _split(args.company_keywords_exclude)
-
-    # Profile/keyword
-    if args.headline_keywords:
-        kw["headline_keywords"] = _split(args.headline_keywords)
-    if args.about_keywords:
-        kw["about_keywords"] = _split(args.about_keywords)
-    if args.profile_keywords:
-        kw["profile_keywords"] = _split(args.profile_keywords)
-    if args.job_description_keywords:
-        kw["job_description_keywords"] = _split(args.job_description_keywords)
-    if args.certification_keywords:
-        kw["certification_keywords"] = _split(args.certification_keywords)
-    if args.school_names:
-        kw["school_names"] = _split(args.school_names)
-
-    # LinkedIn activity
-    if args.min_connections is not None:
-        kw["connection_count"] = args.min_connections
-    if args.max_connections is not None:
-        kw["max_connection_count"] = args.max_connections
-    if args.min_followers is not None:
-        kw["follower_count"] = args.min_followers
-    if args.max_followers is not None:
-        kw["max_follower_count"] = args.max_followers
-    if args.min_experience is not None:
-        kw["experience_count"] = args.min_experience
-    if args.max_experience is not None:
-        kw["max_experience_count"] = args.max_experience
-
-    # Role tenure
-    if args.min_role_months is not None:
-        kw["current_role_min_months"] = args.min_role_months
-    if args.max_role_months is not None:
-        kw["current_role_max_months"] = args.max_role_months
-
-    # Role date range
-    if args.role_range_start_month is not None:
-        kw["role_range_start_month"] = args.role_range_start_month
-    if args.role_range_end_month is not None:
-        kw["role_range_end_month"] = args.role_range_end_month
-
-    # Other
-    if args.languages:
-        kw["languages"] = _split(args.languages)
-    if args.names:
-        kw["names"] = _split(args.names)
-    if args.include_past:
-        kw["include_past_experiences"] = True
 
     return SearchFilters(**kw)
 
 
-def _write_output(people, args):
-    quiet = getattr(args, "quiet", False)
-    output_format = args.output
+def _load_identifiers(args, entity):
+    identifiers = []
+    for attr in ("company_identifier", "domains"):
+        raw = getattr(args, attr, None)
+        if raw:
+            identifiers.extend(_split(raw))
+    if getattr(args, "domains_file", None):
+        with open(args.domains_file) as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if row and row[0].strip() and not row[0].lower().startswith("domain"):
+                    identifiers.append(row[0].strip())
+    return list(dict.fromkeys(identifiers))
 
-    if output_format == "json":
-        json_str = write_json(people, args.output_file)
+
+def _domains_from_company_table(table_id, field_name):
+    client = ClayClient()
+    manager = TableManager(client)
+    info = manager.get_table(table_id)
+    fetcher = RecordFetcher(client)
+    raw_records = fetcher.fetch_all(table_id, info.view_id)
+    table = client.get(f"tables/{table_id}")["table"]
+    fields = table.get("fields", [])
+    field_ids = [f["id"] for f in fields if f.get("name") == field_name]
+    if not field_ids:
+        raise SystemExit(f"error: field {field_name!r} not found in table {table_id}")
+    field_id = field_ids[0]
+    domains = []
+    for record in raw_records:
+        cell = record.get("cells", {}).get(field_id) or {}
+        value = cell.get("value")
+        if isinstance(value, dict):
+            value = value.get("Domain") or value.get("domain")
+        if value:
+            domains.append(str(value).strip())
+    return list(dict.fromkeys(d for d in domains if d))
+
+
+def _write_output(records, args, entity):
+    quiet = getattr(args, "quiet", False)
+    if args.output == "json":
+        json_str = write_json(records, args.output_file, entity=entity)
         if not args.output_file:
             print(json_str)
         elif not quiet:
-            _progress(f"Wrote {len(people)} records to {args.output_file}")
-    elif output_format == "sqlite":
-        output_file = args.output_file or f"clay_people_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-        inserted, skipped = write_sqlite(people, output_file)
+            _progress(f"Wrote {len(records)} records to {args.output_file}")
+    elif args.output == "sqlite":
+        output_file = args.output_file or f"clay_{entity}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        inserted, skipped = write_sqlite(records, output_file, entity=entity)
         if not quiet:
             _progress(f"Wrote {inserted} records to {output_file} ({skipped} duplicates skipped)")
-    else:  # csv
-        output_file = args.output_file or f"clay_people_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        count = write_csv(people, output_file)
+    else:
+        output_file = args.output_file or f"clay_{entity}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        count = write_csv(records, output_file, entity=entity)
         if not quiet:
             _progress(f"Wrote {count} records to {output_file}")
 
 
-# ---------------------------------------------------------------------------
-# Parser
-# ---------------------------------------------------------------------------
+def _add_shared_search_args(parser):
+    parser.add_argument("--mode", choices=["preview", "full", "auto"], default="auto")
+    parser.add_argument("--output", choices=["csv", "sqlite", "json"], default="csv")
+    parser.add_argument("--output-file", "-f", help="Output file path")
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--cleanup", action="store_true", help="Delete Clay table/workbook after extraction")
+    parser.add_argument("--quiet", "-q", action="store_true", help="Suppress progress output")
+    parser.add_argument("--inputs-json", help="Exact raw Clay source inputs JSON object")
+    parser.add_argument("--inputs-file", help="File containing exact raw Clay source inputs JSON object")
+
+
+def _add_typed_args(parser, entity):
+    for field, kind in FIELD_TYPES[entity].items():
+        option = "--" + field.replace("_", "-")
+        if field == "limit":
+            continue
+        if kind == "bool":
+            parser.add_argument(option, nargs="?", const="true", help=f"{field} (true/false)")
+        elif kind == "int":
+            parser.add_argument(option, type=int)
+        else:
+            parser.add_argument(option)
+
+
+def _add_people_alias_args(parser):
+    parser.add_argument("--domains", help="Backward-compatible alias for --company-identifier")
+    parser.add_argument("--domains-file", help="CSV file with domains in the first column")
+    parser.add_argument("--seniority", help="Alias for --job-title-seniority-levels")
+    parser.add_argument("--functions", help="Alias for --job-functions")
+    parser.add_argument("--title-keywords", help="Alias for --job-title-keywords")
+    parser.add_argument("--exclude-titles", help="Alias for --job-title-exclude-keywords")
+    parser.add_argument("--title-mode", choices=["smart", "contain", "exact"], default=None)
+    parser.add_argument("--countries", help="Alias for --location-countries-include")
+    parser.add_argument("--countries-exclude", help="Alias for --location-countries-exclude")
+    parser.add_argument("--states", help="Alias for --location-states-include")
+    parser.add_argument("--states-exclude", help="Alias for --location-states-exclude")
+    parser.add_argument("--cities", help="Alias for --location-cities-include")
+    parser.add_argument("--cities-exclude", help="Alias for --location-cities-exclude")
+    parser.add_argument("--regions", help="Alias for --location-regions-include")
+    parser.add_argument("--regions-exclude", help="Alias for --location-regions-exclude")
+    parser.add_argument("--industries", help="Alias for --company-industries-include")
+    parser.add_argument("--industries-exclude", help="Alias for --company-industries-exclude")
+    parser.add_argument("--company-keywords", help="Alias for --company-description-keywords")
+    parser.add_argument("--company-keywords-exclude", help="Alias for --company-description-keywords-exclude")
+    parser.add_argument("--include-past", action="store_true", help="Alias for --include-past-experiences")
+    parser.add_argument("--min-connections", type=int, help="Alias for --connection-count")
+    parser.add_argument("--max-connections", type=int, help="Alias for --max-connection-count")
+    parser.add_argument("--min-followers", type=int, help="Alias for --follower-count")
+    parser.add_argument("--max-followers", type=int, help="Alias for --max-follower-count")
+    parser.add_argument("--min-experience", type=int, help="Alias for --experience-count")
+    parser.add_argument("--max-experience", type=int, help="Alias for --max-experience-count")
+    parser.add_argument("--min-role-months", type=int, help="Alias for current role minimum months")
+    parser.add_argument("--max-role-months", type=int, help="Alias for current role maximum months")
+    parser.add_argument("--from-company-table", help="Extract company domains from an existing company table")
+    parser.add_argument("--company-domain-field", default="Domain", help="Company table field containing domains")
+
+
+def _add_company_alias_args(parser):
+    parser.add_argument("--countries", help="Alias for --country-names")
+    parser.add_argument("--countries-exclude", help="Alias for --country-names-exclude")
+    parser.add_argument("--company-types", help="Alias for --types")
+    parser.add_argument("--company-sizes", help="Alias for --sizes")
+    parser.add_argument("--industries-include", help="Alias for --industries")
+    parser.add_argument("--industries-exclude-alias", help="Alias for --industries-exclude")
+
+
+def _add_job_alias_args(parser):
+    parser.add_argument("--domains", help="Alias for --company-identifier")
+    parser.add_argument("--domains-file", help="CSV file with domains in the first column")
+    parser.add_argument("--title-keywords", help="Alias for --job-title-keywords")
+    parser.add_argument("--exclude-titles", help="Alias for --job-title-exclude-keywords")
+    parser.add_argument("--from-company-table", help="Extract company domains from an existing company table")
+    parser.add_argument("--company-domain-field", default="Domain", help="Company table field containing domains")
+
 
 def build_parser():
     parser = argparse.ArgumentParser(prog="clay", description="Clay SDK CLI")
     sub = parser.add_subparsers(dest="command")
 
-    # --- people ---
-    people_parser = sub.add_parser("people", help="People operations")
-    people_sub = people_parser.add_subparsers(dest="people_command")
+    subparsers = {}
+    for entity, help_text, handler in [
+        ("companies", "Company operations", cmd_company_search),
+        ("people", "People operations", cmd_people_search),
+        ("jobs", "Job operations", cmd_job_search),
+    ]:
+        entity_parser = sub.add_parser(entity, help=help_text)
+        subparsers[entity] = entity_parser
+        entity_sub = entity_parser.add_subparsers(dest=f"{entity}_command")
+        search = entity_sub.add_parser("search", help=f"Search for {entity}")
+        search.set_defaults(func=handler, entity=entity)
+        _add_shared_search_args(search)
+        _add_typed_args(search, entity)
+        if entity == "people":
+            _add_people_alias_args(search)
+        elif entity == "companies":
+            _add_company_alias_args(search)
+        else:
+            _add_job_alias_args(search)
 
-    search_p = people_sub.add_parser("search", help="Search for people at companies")
-    search_p.add_argument("--domains", help="Comma-separated domains")
-    search_p.add_argument("--domains-file", help="CSV file with domains (first column)")
-    search_p.add_argument("--mode", choices=["preview", "full", "auto"], default="auto")
-    search_p.add_argument("--output", choices=["csv", "sqlite", "json"], default="csv")
-    search_p.add_argument("--output-file", "-f", help="Output file path")
-    search_p.add_argument("--limit", type=int, default=None,
-                          help="Total max results across all companies (default: plan cap)")
-    search_p.add_argument("--limit-per-company", type=int, default=None,
-                          help="Max results per company (default: no per-company cap)")
-    # Filter: seniority & functions
-    search_p.add_argument("--seniority", help="Comma-separated seniority levels")
-    search_p.add_argument("--functions", help="Comma-separated job functions")
-
-    # Filter: title
-    search_p.add_argument("--title-keywords", help="Comma-separated title keywords")
-    search_p.add_argument("--exclude-titles", help="Comma-separated title exclusion keywords")
-    search_p.add_argument("--title-mode", choices=["smart", "contain", "exact"], default="smart",
-                          help="Title matching mode (default: smart)")
-
-    # Filter: location
-    search_p.add_argument("--countries", help="Comma-separated country names to include")
-    search_p.add_argument("--countries-exclude", help="Comma-separated country names to exclude")
-    search_p.add_argument("--states", help="Comma-separated states to include")
-    search_p.add_argument("--states-exclude", help="Comma-separated states to exclude")
-    search_p.add_argument("--cities", help="Comma-separated cities to include")
-    search_p.add_argument("--cities-exclude", help="Comma-separated cities to exclude")
-    search_p.add_argument("--regions", help="Comma-separated regions to include")
-    search_p.add_argument("--regions-exclude", help="Comma-separated regions to exclude")
-
-    # Filter: company
-    search_p.add_argument("--company-sizes",
-                          help="Comma-separated company sizes (e.g. '51-200,201-500,501-1000'). "
-                               "Buckets with commas in labels are auto-normalized to Clay's canonical form.")
-    search_p.add_argument("--industries", help="Comma-separated industries to include")
-    search_p.add_argument("--industries-exclude", help="Comma-separated industries to exclude")
-    search_p.add_argument("--company-keywords", help="Comma-separated company description keywords")
-    search_p.add_argument("--company-keywords-exclude", help="Comma-separated company description exclusions")
-
-    # Filter: profile/keyword
-    search_p.add_argument("--headline-keywords", help="Comma-separated LinkedIn headline keywords")
-    search_p.add_argument("--about-keywords", help="Comma-separated LinkedIn about section keywords")
-    search_p.add_argument("--profile-keywords", help="Comma-separated general profile keywords")
-    search_p.add_argument("--job-description-keywords", help="Comma-separated job description keywords")
-    search_p.add_argument("--certification-keywords", help="Comma-separated certification keywords")
-    search_p.add_argument("--school-names", help="Comma-separated school/university names")
-
-    # Filter: LinkedIn activity
-    search_p.add_argument("--min-connections", type=int, help="Minimum LinkedIn connections")
-    search_p.add_argument("--max-connections", type=int, help="Maximum LinkedIn connections")
-    search_p.add_argument("--min-followers", type=int, help="Minimum LinkedIn followers")
-    search_p.add_argument("--max-followers", type=int, help="Maximum LinkedIn followers")
-    search_p.add_argument("--min-experience", type=int, help="Minimum experience entries")
-    search_p.add_argument("--max-experience", type=int, help="Maximum experience entries")
-
-    # Filter: role tenure
-    search_p.add_argument("--min-role-months", type=int, help="Min months in current role")
-    search_p.add_argument("--max-role-months", type=int, help="Max months in current role")
-
-    # Filter: role date range
-    search_p.add_argument("--role-range-start-month", type=int, help="Role start date filter (months ago)")
-    search_p.add_argument("--role-range-end-month", type=int, help="Role end date filter (months ago)")
-
-    # Filter: other
-    search_p.add_argument("--languages", help="Comma-separated languages")
-    search_p.add_argument("--names", help="Comma-separated person names to filter")
-    search_p.add_argument("--include-past", action="store_true", help="Include past experiences")
-
-    search_p.add_argument("--cleanup", action="store_true", help="Delete Clay table after extraction")
-    search_p.add_argument("--quiet", "-q", action="store_true", help="Suppress progress output")
-    search_p.add_argument("--batch-size", type=int, default=1,
-                          help="Domains per Clay table in full mode (default: 1)")
-
-    # --- table ---
     table_parser = sub.add_parser("table", help="Table operations")
+    subparsers["table"] = table_parser
     table_sub = table_parser.add_subparsers(dest="table_command")
-
-    table_sub.add_parser("list", help="List tables in workspace")
-
+    list_p = table_sub.add_parser("list", help="List tables in workspace")
+    list_p.set_defaults(func=cmd_table_list)
     info_p = table_sub.add_parser("info", help="Get table info")
-    info_p.add_argument("table_id", help="Table ID")
-
+    info_p.add_argument("table_id")
+    info_p.set_defaults(func=cmd_table_info)
     count_p = table_sub.add_parser("count", help="Get record count")
-    count_p.add_argument("table_id", help="Table ID")
-
+    count_p.add_argument("table_id")
+    count_p.set_defaults(func=cmd_table_count)
     del_p = table_sub.add_parser("delete", help="Delete a table")
-    del_p.add_argument("table_id", help="Table ID")
+    del_p.add_argument("table_id")
+    del_p.set_defaults(func=cmd_table_delete)
 
-    # --- auth ---
     auth_parser = sub.add_parser("auth", help="Authentication")
+    subparsers["auth"] = auth_parser
     auth_sub = auth_parser.add_subparsers(dest="auth_command")
-    auth_sub.add_parser("login", help="Login and verify session")
-    auth_sub.add_parser("status", help="Show auth status")
+    login_p = auth_sub.add_parser("login", help="Login and verify session")
+    login_p.set_defaults(func=cmd_auth_login)
+    status_p = auth_sub.add_parser("status", help="Show auth status")
+    status_p.set_defaults(func=cmd_auth_status)
 
-    # --- keywords ---
     kw_parser = sub.add_parser("keywords", help="Keyword expansion tools")
+    subparsers["keywords"] = kw_parser
     kw_sub = kw_parser.add_subparsers(dest="keywords_command")
-
     expand_p = kw_sub.add_parser("expand", help="Expand keywords with related terms")
-    expand_p.add_argument("--terms", required=True, help="Comma-separated seed keywords")
-    expand_p.add_argument("--output", choices=["text", "json"], default="text",
-                          help="Output format (default: text)")
+    expand_p.add_argument("--terms", required=True)
+    expand_p.add_argument("--output", choices=["text", "json"], default="text")
+    expand_p.set_defaults(func=cmd_keywords_expand)
 
-    # --- setup ---
-    sub.add_parser("setup", help="Interactive setup wizard")
+    setup_p = sub.add_parser("setup", help="Interactive setup wizard")
+    setup_p.set_defaults(func=cmd_setup)
 
-    # --- update ---
-    sub.add_parser("update", help="Update autoclay to latest version")
+    update_p = sub.add_parser("update", help="Update autoclay to latest version")
+    update_p.set_defaults(func=cmd_update)
 
-    return parser, {"people": people_parser, "table": table_parser, "auth": auth_parser, "keywords": kw_parser}
+    return parser, subparsers
 
 
 def main():
     parser, subparsers = build_parser()
-
-    # Intercept missing subcommands before argparse prints its own error
     if len(sys.argv) == 2 and sys.argv[1] in subparsers:
         subparsers[sys.argv[1]].print_help()
         sys.exit(1)
 
     args = parser.parse_args()
-
     if not args.command:
-        print(BANNER)
-        print(TAGLINE)
-        print()
         parser.print_help()
         sys.exit(1)
 
-    # Top-level commands (no subcommand)
-    if args.command == "setup":
-        cmd_setup(args)
-        return
-    if args.command == "update":
-        cmd_update(args)
-        return
-
-    dispatch = {
-        ("people", "search"): cmd_people_search,
-        ("table", "list"): cmd_table_list,
-        ("table", "info"): cmd_table_info,
-        ("table", "count"): cmd_table_count,
-        ("table", "delete"): cmd_table_delete,
-        ("auth", "login"): cmd_auth_login,
-        ("auth", "status"): cmd_auth_status,
-        ("keywords", "expand"): cmd_keywords_expand,
-    }
-
-    subcmd = None
-    if args.command == "people":
-        subcmd = getattr(args, "people_command", None)
-    elif args.command == "table":
-        subcmd = getattr(args, "table_command", None)
-    elif args.command == "auth":
-        subcmd = getattr(args, "auth_command", None)
-    elif args.command == "keywords":
-        subcmd = getattr(args, "keywords_command", None)
-
-    key = (args.command, subcmd)
-    handler = dispatch.get(key)
+    handler = getattr(args, "func", None)
     if handler:
         handler(args)
-    elif args.command in subparsers:
+        return
+
+    if args.command in subparsers:
         subparsers[args.command].print_help()
         sys.exit(1)
-    else:
-        parser.print_help()
-        sys.exit(1)
+    parser.print_help()
+    sys.exit(1)

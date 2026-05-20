@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "autoclay"
 version = "0.1.0"
-description = "Python SDK and CLI for Clay's People Search API"
+description = "Python SDK and CLI for Clay's Companies, People, Jobs source APIs"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"

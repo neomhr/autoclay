@@ -1,53 +1,53 @@
-"""SQLite output for Clay people results."""
+"""SQLite output for Clay CPJ results."""
 
 import sqlite3
 
 
-def write_sqlite(people, output_file):
-    """Write a list of Person objects to a SQLite database.
+UNIQUE_KEYS = {
+    "companies": "domain",
+    "people": "linkedin_url",
+    "jobs": "url",
+}
 
-    Creates (or reuses) a `clay_people` table with a UNIQUE constraint on
-    linkedin_url.  Duplicate linkedin_urls are silently skipped via
-    INSERT OR IGNORE.
 
-    Args:
-        people: List of Person instances.
-        output_file: Path to the SQLite database file.
+def write_sqlite(records, output_file, entity="people"):
+    """Write records to an entity-specific SQLite table."""
+    table = f"clay_{entity}"
+    if not records:
+        conn = sqlite3.connect(output_file)
+        conn.close()
+        return (0, 0)
 
-    Returns:
-        Tuple of (inserted_count, skipped_count).
-    """
+    headers = records[0].field_names()
+    unique_key = UNIQUE_KEYS.get(entity, headers[0])
+    column_defs = []
+    for header in headers:
+        suffix = " UNIQUE" if header == unique_key else ""
+        column_defs.append(f"{header} TEXT{suffix}")
+
     conn = sqlite3.connect(output_file)
     cur = conn.cursor()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS clay_people (
+    cur.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {table} (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            first_name TEXT,
-            last_name TEXT,
-            full_name TEXT,
-            job_title TEXT,
-            location TEXT,
-            company_domain TEXT,
-            linkedin_url TEXT UNIQUE,
+            {", ".join(column_defs)},
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+        """
+    )
 
+    placeholders = ", ".join(f":{header}" for header in headers)
+    columns = ", ".join(headers)
     inserted = 0
-    for person in people:
-        d = person.to_dict()
+    for record in records:
         cur.execute(
-            """INSERT OR IGNORE INTO clay_people
-               (first_name, last_name, full_name, job_title, location, company_domain, linkedin_url)
-               VALUES (:first_name, :last_name, :full_name, :job_title, :location, :company_domain, :linkedin_url)""",
-            d,
+            f"INSERT OR IGNORE INTO {table} ({columns}) VALUES ({placeholders})",
+            record.to_dict(),
         )
         if cur.rowcount == 1:
             inserted += 1
 
     conn.commit()
     conn.close()
-
-    skipped = len(people) - inserted
-    return (inserted, skipped)
+    return (inserted, len(records) - inserted)

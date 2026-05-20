@@ -48,18 +48,19 @@ class RecordFetcher:
         return self.bulk_fetch(table_id, ids)
 
     @staticmethod
-    def parse_records(raw_records: list, field_mapping: dict) -> list:
-        """Convert raw API records into Person dataclass instances.
+    def parse_records(raw_records: list, field_mapping: dict, record_class=Person) -> list:
+        """Convert raw API records into record dataclass instances.
 
         Args:
             raw_records: List of record dicts from bulk_fetch.
-            field_mapping: Dict of field_id -> Person attribute name
+            field_mapping: Dict of field_id -> record attribute name
                            (produced by TableManager.get_field_mapping).
+            record_class: Dataclass type to instantiate.
 
         Returns:
-            List of Person objects with mapped fields populated.
+            List of record objects with mapped fields populated.
         """
-        people = []
+        records = []
         for record in raw_records:
             cells = record.get("cells", {})
             kwargs = {}
@@ -67,5 +68,5 @@ class RecordFetcher:
                 cell = cells.get(field_id)
                 if cell is not None:
                     kwargs[col_name] = cell.get("value", "")
-            people.append(Person(**kwargs))
-        return people
+            records.append(record_class(**kwargs))
+        return records

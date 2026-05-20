@@ -1,14 +1,9 @@
 """Clay session management — email/password login with cookie caching.
 
-Auth flow: POST /v3/auth/login with email/password, parse Set-Cookie
-for claysession, cache in memory + on disk (~/.autoclay/session.json)
-with 23-hour expiry.
+Auth flow ported from clay-mcp: POST /v3/auth/login with email/password,
+parse Set-Cookie for claysession, cache with 23-hour expiry.
 
-Credential sources (in priority order):
-  1. In-memory cached cookie (not expired)
-  2. Disk-cached session (~/.autoclay/session.json, not expired)
-  3. Email/password login (env vars or ~/.autoclay/credentials.json)
-  4. CLAY_SESSION_COOKIE env var (manual override)
+Fallback: CLAY_SESSION_COOKIE env var for manual override.
 """
 
 import json
@@ -29,7 +24,7 @@ from .exceptions import ClayAuthError
 
 
 class SessionManager:
-    """Manages Clay session authentication with disk-backed caching."""
+    """Manages Clay session authentication."""
 
     def __init__(self):
         self._cookie = None
@@ -48,10 +43,7 @@ class SessionManager:
     def is_authenticated(self):
         return self._cookie is not None and not self.is_expired
 
-    # -- Disk cache -----------------------------------------------------------
-
     def _load_cached_session(self):
-        """Try to load a valid session from ~/.autoclay/session.json."""
         if not SESSION_FILE.exists():
             return False
         try:
@@ -67,32 +59,26 @@ class SessionManager:
         return False
 
     def _save_session_cache(self):
-        """Persist current session to disk for cross-process sharing."""
         if not self._cookie:
             return
         try:
             ensure_autoclay_dir()
-            data = {"cookie": self._cookie, "expiry": self._expiry}
-            SESSION_FILE.write_text(json.dumps(data) + "\n")
+            SESSION_FILE.write_text(json.dumps({"cookie": self._cookie, "expiry": self._expiry}) + "\n")
             SESSION_FILE.chmod(0o600)
         except OSError:
-            pass  # non-fatal — in-memory session still works
-
-    # -- Session lifecycle ----------------------------------------------------
+            pass
 
     def ensure_session(self):
         """Ensure we have a valid session. Re-auth if expired.
 
         Priority:
-        1. In-memory cached cookie (not expired)
-        2. Disk-cached session (~/.autoclay/session.json)
-        3. Login with email + password (env vars or credentials.json)
-        4. CLAY_SESSION_COOKIE env var (manual override)
+        1. Cached cookie that hasn't expired
+        2. Login with CLAY_EMAIL + CLAY_PASSWORD
+        3. CLAY_SESSION_COOKIE env var (manual override)
         """
         if self.is_authenticated:
             return
 
-        # Try disk cache (shared across parallel processes)
         if self._load_cached_session():
             return
 
@@ -108,20 +94,18 @@ class SessionManager:
             if not raw.startswith("claysession="):
                 raw = f"claysession={raw}"
             self._cookie = raw
+            # Manual cookies get 23-hour expiry from now
             self._expiry = time.time() + SESSION_COOKIE_MAX_AGE_HOURS * 3600
             self._save_session_cache()
             return
 
         raise ClayAuthError(
-            "No auth configured. Run 'clay setup' or set "
-            "CLAY_EMAIL + CLAY_PASSWORD environment variables."
+            "No auth configured. Set CLAY_EMAIL + CLAY_PASSWORD, "
+            "or CLAY_SESSION_COOKIE as fallback."
         )
 
     def login(self, email, password):
-        """Login via POST /v3/auth/login and extract claysession cookie.
-
-        Returns the workspace ID parsed from the redirect URL, or None.
-        """
+        """Login via POST /v3/auth/login and extract claysession cookie."""
         url = f"{CLAY_API_BASE}/auth/login"
         payload = json.dumps({
             "email": email,
@@ -158,17 +142,13 @@ class SessionManager:
                 self._cookie = cookie_value
                 self._expiry = time.time() + SESSION_COOKIE_MAX_AGE_HOURS * 3600
                 self._save_session_cache()
-
-                # Parse workspace ID from redirect URL in response body
-                workspace_id = None
                 raw = resp.read().decode()
                 if raw:
                     body = json.loads(raw)
                     redirect = body.get("redirect_to", "")
                     if "/workspaces/" in redirect:
-                        workspace_id = redirect.rsplit("/workspaces/", 1)[-1].split("/")[0]
-
-                return workspace_id
+                        return redirect.rsplit("/workspaces/", 1)[-1].split("/")[0]
+                return None
 
         except urllib.error.HTTPError as e:
             body = e.read().decode()

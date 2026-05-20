@@ -1,22 +1,13 @@
-"""JSON output for Clay people results."""
+"""JSON output for Clay CPJ results."""
 
 import json
 
 
-def write_json(people, output_file=None):
-    """Write a list of Person objects as JSON.
-
-    Args:
-        people: List of Person instances.
-        output_file: Optional path to write JSON to. If None, the JSON string
-            is returned without writing to disk (useful for stdout piping).
-
-    Returns:
-        The JSON string.
-    """
+def write_json(records, output_file=None, entity="people"):
+    """Write records as JSON using the entity collection key."""
     payload = {
-        "count": len(people),
-        "people": [person.to_dict() for person in people],
+        "count": len(records),
+        entity: [record.to_dict() for record in records],
     }
 
     json_str = json.dumps(payload, indent=2)

@@ -1,4 +1,4 @@
-"""autoclay — Python SDK and CLI for Clay's People Search API.
+"""Clay Python SDK — composable API wrapper for Clay's internal API.
 
 Usage (programmatic):
     from autoclay import ClayClient, PeopleSearch, SearchFilters
@@ -14,20 +14,25 @@ Usage (CLI):
 """
 
 from .client import ClayClient
-from .models import Person, SearchFilters, SearchResult, TableInfo, SourceRun
-from .search import PeopleSearch, KeywordExpander
+from .models import CompanyRecord, Person, PersonRecord, JobRecord, SearchFilters, SearchResult, TableInfo, SourceRun
+from .search import CompanySearch, PeopleSearch, JobSearch, KeywordExpander
 from .tables import TableManager, RecordFetcher
 from .auth import SessionManager
 from .exceptions import ClayError, ClayAPIError, ClayAuthError, ClayTimeoutError
 
 __all__ = [
     "ClayClient",
+    "CompanyRecord",
     "Person",
+    "PersonRecord",
+    "JobRecord",
     "SearchFilters",
     "SearchResult",
     "TableInfo",
     "SourceRun",
+    "CompanySearch",
     "PeopleSearch",
+    "JobSearch",
     "KeywordExpander",
     "TableManager",
     "RecordFetcher",

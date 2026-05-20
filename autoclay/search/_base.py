@@ -1,4 +1,4 @@
-"""Abstract base for Clay search modules — encodes the 6-step Sculptor flow."""
+"""Generic Clay Companies/People/Jobs source search flow."""
 
 import sys
 import time
@@ -6,89 +6,65 @@ import time
 from ..client import ClayClient
 from ..config import ACTION_PACKAGE_ID, DEFAULT_POLL_INTERVAL, DEFAULT_POLL_TIMEOUT
 from ..exceptions import ClayAPIError, ClayTimeoutError
-from ..models import Person, SearchFilters, SearchResult
+from ..models import SearchFilters, SearchResult
 from ..tables.manager import TableManager
 from ..tables.records import RecordFetcher
 
 
 class BaseSearch:
-    """Abstract base encoding the Sculptor search flow.
+    """Generic CPJ source runner.
 
-    Subclasses override class attributes and implement the three abstract
-    methods: build_inputs, parse_preview_record, and _workbook_name.
+    Subclasses provide entity-specific action keys, field metadata, input
+    construction, and raw record parsing.
     """
 
-    # -- Subclass overrides ---------------------------------------------------
-
+    ENTITY: str = ""
     SOURCE_TYPE: str = ""
     ACTION_KEY: str = ""
     PREVIEW_ACTION_KEY: str = ""
     TABLE_TYPE: str = ""
+    FIELD_ID: str = ""
+    FIELD_NAME: str = ""
+    ICON_TYPE: str = ""
+    PREVIEW_TEXT_PATH: str = ""
+    DEFAULT_PREVIEW_TEXT: str = ""
+    RECORDS_PATH: str = ""
+    COUNT_PATH: str = ""
+    ID_PATH: str = ""
     BASIC_FIELDS: list = []
-
-    # -- Construction ---------------------------------------------------------
+    RECORD_CLASS = None
 
     def __init__(self, client: ClayClient):
         self.client = client
 
-    # -- Public API -----------------------------------------------------------
-
     def search(
         self,
-        identifiers,
+        identifiers=None,
         filters=None,
         limit=None,
-        limit_per_company=None,
         mode="auto",
         cleanup=False,
         on_progress=None,
     ):
-        """Run a search and return a SearchResult.
-
-        Args:
-            identifiers: List of search identifiers (e.g. company domains).
-            filters: Optional SearchFilters dataclass.
-            limit: Total max results across all companies (None = API default).
-            limit_per_company: Max results per company (None = no per-company cap).
-            mode: "auto" (preview if limit <= 50, else full), "preview", or "full".
-            cleanup: If True, delete the table after fetching records (full mode only).
-            on_progress: Optional callable(str) for progress messages.
-                         Defaults to printing to stderr.
-
-        Returns:
-            SearchResult with people, total_count, mode, and optional table metadata.
-        """
-        if filters is None:
-            filters = SearchFilters()
-        if on_progress is None:
-            on_progress = lambda msg: print(msg, file=sys.stderr)
+        """Run a CPJ search and return a SearchResult."""
+        identifiers = identifiers or []
+        filters = filters or SearchFilters()
+        on_progress = on_progress or (lambda msg: print(msg, file=sys.stderr))
 
         use_preview = self._resolve_mode(mode, limit)
-
         if use_preview:
-            return self._run_preview(identifiers, filters, limit, limit_per_company, on_progress)
-        return self._full_search(identifiers, filters, limit, limit_per_company, cleanup, on_progress)
-
-    # -- Mode resolution ------------------------------------------------------
+            return self._run_preview(identifiers, filters, limit, on_progress)
+        return self._full_search(identifiers, filters, limit, cleanup, on_progress)
 
     @staticmethod
     def _resolve_mode(mode, limit):
-        """Return True if preview mode should be used."""
         if mode == "preview":
             return True
         if mode == "full":
             return False
-        # auto: preview when limit fits
         return limit is not None and limit <= 50
 
-    # -- Preview flow ---------------------------------------------------------
-
-    def _preview_search(self, identifiers, filters, limit, limit_per_company=None):
-        """Execute a synchronous preview search.
-
-        Returns:
-            (task_id, list_of_Person)
-        """
+    def _preview_search(self, identifiers, filters, limit):
         if limit is not None and limit > 50:
             limit = 50
 
@@ -99,114 +75,81 @@ class BaseSearch:
                 "returnTaskId": True,
                 "returnActionMetadata": True,
             },
-            "inputs": self.build_inputs(identifiers, filters, limit, limit_per_company),
+            "inputs": self.build_inputs(identifiers, filters, limit),
         }
 
         data = self.client.post("actions/run-cpj-preview-enrichment", body)
         task_id = data.get("taskId")
         result = data.get("result") or {}
-        raw_people = result.get("people", [])
-        people = [self.parse_preview_record(p) for p in raw_people]
-        return task_id, people
+        raw_records = result.get(self.RECORDS_PATH, [])
+        records = [self.parse_preview_record(record) for record in raw_records]
+        count = result.get(self.COUNT_PATH)
+        return task_id, records, count
 
-    def _run_preview(self, identifiers, filters, limit, limit_per_company, on_progress):
-        """Run preview and wrap into SearchResult."""
-        on_progress("Running preview search...")
-        _, people = self._preview_search(identifiers, filters, limit, limit_per_company)
-        on_progress(f"Preview complete — {len(people)} results.")
+    def _run_preview(self, identifiers, filters, limit, on_progress):
+        on_progress(f"Running {self.ENTITY} preview search...")
+        _, records, count = self._preview_search(identifiers, filters, limit)
+        on_progress(f"Preview complete - {len(records)} results.")
         return SearchResult(
-            people=people,
-            total_count=len(people),
+            records=self._apply_client_limit(records, limit),
+            total_count=count if isinstance(count, int) else len(records),
             mode="preview",
+            entity=self.ENTITY,
         )
 
-    # -- Full table flow ------------------------------------------------------
-
-    def _full_search(self, identifiers, filters, limit, limit_per_company, cleanup, on_progress):
-        """Execute the full 6-step Sculptor flow.
-
-        1. Create conversation
-        2. Run preview (for taskId)
-        3. Create table
-        4. Poll until source run completes
-        5-6. Fetch records, parse, return
-        """
-        # Step 1: Create conversation
+    def _full_search(self, identifiers, filters, limit, cleanup, on_progress):
         on_progress("Step 1/6: Creating conversation...")
-        conversation_id = self._create_conversation()
+        conversation_id = self._create_conversation(filters)
 
-        # Step 2: Run preview for taskId
         on_progress("Step 2/6: Running preview for task ID...")
         preview_limit = min(limit, 50) if limit is not None else 50
-        task_id, _ = self._preview_search(identifiers, filters, preview_limit, limit_per_company)
+        task_id, _, _ = self._preview_search(identifiers, filters, preview_limit)
 
-        # Step 3: Create table
         on_progress("Step 3/6: Creating table...")
-        table_meta = self._create_table(
-            identifiers, filters, limit, limit_per_company, conversation_id, task_id
-        )
+        table_meta = self._create_table(identifiers, filters, limit, conversation_id, task_id)
         table_id = table_meta["tableId"]
         view_id = table_meta["viewId"]
         source_id = table_meta["sourceId"]
         workbook_id = table_meta.get("workbookId")
 
-        # Step 4: Poll for completion
         on_progress("Step 4/6: Polling for source run completion...")
         self._poll_source(source_id, on_progress)
 
-        # Step 5-6: Fetch and parse records
         on_progress("Step 5/6: Fetching records...")
         fetcher = RecordFetcher(self.client)
         manager = TableManager(self.client)
-
         raw_records = fetcher.fetch_all(table_id, view_id)
-        field_mapping = manager.get_field_mapping(table_id)
-        people = RecordFetcher.parse_records(raw_records, field_mapping)
-        people = self._apply_client_limits(people, limit, limit_per_company)
-        total_count = len(people)
+        field_mapping = manager.get_field_mapping(table_id, self.field_name_map())
+        records = RecordFetcher.parse_records(raw_records, field_mapping, self.RECORD_CLASS)
+        records = self._apply_client_limit(records, limit)
+        on_progress(f"Step 6/6: Fetched {len(records)} records.")
 
-        on_progress(f"Step 6/6: Fetched {total_count} records.")
-
-        # Cleanup if requested
         if cleanup:
-            on_progress("Cleaning up — deleting table...")
+            on_progress("Cleaning up - deleting table...")
             manager.delete_table(table_id)
             if workbook_id:
-                on_progress("Cleaning up — deleting workbook...")
+                on_progress("Cleaning up - deleting workbook...")
                 manager.delete_workbook(workbook_id)
 
         return SearchResult(
-            people=people,
-            total_count=total_count,
+            records=records,
+            total_count=len(records),
             mode="full",
+            entity=self.ENTITY,
             table_id=table_id,
             source_id=source_id,
             workbook_id=workbook_id,
         )
 
     @staticmethod
-    def _apply_client_limits(people, limit, limit_per_company):
-        """Apply CLI limits after fetch as a guard against API limit drift."""
-        if limit_per_company is not None:
-            per_company_counts = {}
-            limited = []
-            for person in people:
-                key = (person.company_domain or "").lower()
-                current = per_company_counts.get(key, 0)
-                if current >= limit_per_company:
-                    continue
-                per_company_counts[key] = current + 1
-                limited.append(person)
-            people = limited
+    def _apply_client_limit(records, limit):
+        if limit is None:
+            return records
+        return records[:limit]
 
-        if limit is not None:
-            people = people[:limit]
-
-        return people
-
-    def _create_conversation(self):
-        """Step 1: Create an AI onboarding conversation."""
-        inputs = self.build_inputs([], SearchFilters(), None)
+    def _create_conversation(self, filters):
+        inputs = self.build_inputs([], filters, None)
+        now = time.time()
         body = {
             "conversationType": "ai_onboarding",
             "initialSourceState": {
@@ -218,8 +161,8 @@ class BaseSearch:
                     "filters": inputs,
                     "additionalRequirements": [],
                     "originalQuery": "",
-                    "createdAt": time.time(),
-                    "lastModifiedAt": time.time(),
+                    "createdAt": now,
+                    "lastModifiedAt": now,
                 },
             },
         }
@@ -229,29 +172,28 @@ class BaseSearch:
         )
         return resp["conversationId"]
 
-    def _create_table(self, identifiers, filters, limit, limit_per_company, conversation_id, task_id):
-        """Step 3: Create a CPJ table from the search spec."""
+    def _create_table(self, identifiers, filters, limit, conversation_id, task_id):
         body = {
             "workspaceId": self.client.workspace_id,
             "workbookName": self._workbook_name(identifiers),
             "workbookId": None,
             "conversationId": conversation_id,
-            "assignedFieldId": "f_people_search",
+            "assignedFieldId": self.FIELD_ID,
             "cpjConfig": {
                 "type": self.SOURCE_TYPE,
                 "typeSettings": {
-                    "name": "Find people",
-                    "iconType": "User",
+                    "name": self.FIELD_NAME,
+                    "iconType": self.ICON_TYPE,
                     "actionKey": self.ACTION_KEY,
                     "actionPackageId": ACTION_PACKAGE_ID,
-                    "previewTextPath": "name",
-                    "defaultPreviewText": "Clay Profile",
-                    "recordsPath": "people",
-                    "idPath": "profile_id",
+                    "previewTextPath": self.PREVIEW_TEXT_PATH,
+                    "defaultPreviewText": self.DEFAULT_PREVIEW_TEXT,
+                    "recordsPath": self.RECORDS_PATH,
+                    "idPath": self.ID_PATH,
                     "scheduleConfig": {"runSettings": "once"},
                     "dedupeOnUniqueIds": True,
                     "hasEvaluatedInputs": True,
-                    "inputs": self.build_inputs(identifiers, filters, limit, limit_per_company),
+                    "inputs": self.build_inputs(identifiers, filters, limit),
                     "previewActionKey": self.PREVIEW_ACTION_KEY,
                 },
                 "clientSettings": {"tableType": self.TABLE_TYPE},
@@ -262,7 +204,6 @@ class BaseSearch:
         return self.client.post("sources/create-cpj-table", body)
 
     def _poll_source(self, source_id, on_progress):
-        """Step 4: Poll source runs until SUCCESS, ERROR, or timeout."""
         deadline = time.time() + DEFAULT_POLL_TIMEOUT
         while time.time() < deadline:
             resp = self.client.get(f"sources/{source_id}/runs?limit=1")
@@ -279,47 +220,21 @@ class BaseSearch:
                         status_code=None,
                         response_body=msg,
                     )
-                on_progress(f"  Status: {status} — waiting...")
+                on_progress(f"  Status: {status} - waiting...")
             time.sleep(DEFAULT_POLL_INTERVAL)
 
         raise ClayTimeoutError(
             f"Source run did not complete within {DEFAULT_POLL_TIMEOUT}s"
         )
 
-    # -- Abstract methods (subclass must implement) ---------------------------
+    def field_name_map(self):
+        return {field["name"]: field["attr"] for field in self.OUTPUT_FIELDS}
 
-    def build_inputs(self, identifiers, filters, limit, limit_per_company=None):
-        """Build the API inputs dict for this search type.
-
-        Args:
-            identifiers: List of search identifiers.
-            filters: SearchFilters dataclass.
-            limit: Total max results, or None.
-            limit_per_company: Max results per company, or None.
-
-        Returns:
-            dict suitable for the Clay API inputs field.
-        """
+    def build_inputs(self, identifiers, filters, limit):
         raise NotImplementedError
 
     def parse_preview_record(self, raw):
-        """Parse a single raw preview result dict into a Person.
-
-        Args:
-            raw: Dict from the preview API response.
-
-        Returns:
-            Person instance.
-        """
         raise NotImplementedError
 
     def _workbook_name(self, identifiers):
-        """Generate a human-readable workbook name.
-
-        Args:
-            identifiers: List of search identifiers.
-
-        Returns:
-            str workbook name.
-        """
         raise NotImplementedError

@@ -31,7 +31,6 @@ class TableManager:
             if e.status_code != 403:
                 raise
             return self.list_workbooks()
-
         tables = []
         for t in resp:
             tables.append(
@@ -39,14 +38,14 @@ class TableManager:
                     table_id=t.get("id", ""),
                     name=t.get("name", ""),
                     record_count=t.get("totalRecordsCount", 0),
-                    view_id=t.get("defaultViewId", ""),
+                    view_id=t.get("defaultViewId") or t.get("firstViewId", ""),
                     workbook_id=t.get("workbookId", ""),
                 )
             )
         return tables
 
     def list_workbooks(self) -> list:
-        """Return visible workbooks when the admin-only table list is forbidden."""
+        """Return visible workbooks when the table list endpoint is forbidden."""
         resp = self.client.post(
             f"workspaces/{self.client.workspace_id}/resources_v2/",
             {
@@ -78,7 +77,7 @@ class TableManager:
             table_id=t.get("id", table_id),
             name=t.get("name", ""),
             record_count=t.get("totalRecordsCount", 0),
-            view_id=t.get("defaultViewId", ""),
+            view_id=t.get("defaultViewId") or t.get("firstViewId", ""),
             workbook_id=t.get("workbookId", ""),
         )
 
@@ -95,18 +94,19 @@ class TableManager:
         """Delete a workbook by ID."""
         self.client.delete(f"workbooks/{workbook_id}")
 
-    def get_field_mapping(self, table_id: str) -> dict:
+    def get_field_mapping(self, table_id: str, field_name_map=None) -> dict:
         """Build a mapping of field_id -> our column name for known fields.
 
         Fetches the table schema, iterates over fields, and maps any Clay
-        column name we recognise (via FIELD_NAME_MAP) to the corresponding
-        Person dataclass attribute name.  Unknown fields are skipped.
+        column name we recognise to the corresponding dataclass attribute name.
+        Unknown fields are skipped.
         """
+        field_name_map = field_name_map or FIELD_NAME_MAP
         resp = self.client.get(f"tables/{table_id}")
         fields = resp["table"].get("fields", [])
         mapping = {}
         for f in fields:
             clay_name = f.get("name", "")
-            if clay_name in FIELD_NAME_MAP:
-                mapping[f["id"]] = FIELD_NAME_MAP[clay_name]
+            if clay_name in field_name_map:
+                mapping[f["id"]] = field_name_map[clay_name]
         return mapping
