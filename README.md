@@ -59,12 +59,16 @@ All three search commands support:
 --output csv|json|sqlite
 --output-file PATH
 --cleanup
+--wait-timeout SECONDS
+--detach
 --quiet
 --inputs-json '{"exact":"Clay inputs"}'
 --inputs-file inputs.json
 ```
 
 `--inputs-json` and `--inputs-file` pass exact raw Clay source inputs. When used, typed filters are ignored and only mode, output, cleanup, and client-side limiting remain CLI-controlled.
+
+Full-mode searches create durable Clay workbooks and tables before local polling starts. If `--wait-timeout` is reached, the CLI exits successfully with the remote run marked pending and writes a non-secret run manifest to `~/.clay-cpl/runs/`. Use `--detach` to create the Clay table and exit immediately without waiting.
 
 ## Entity Outputs
 
@@ -143,5 +147,13 @@ Outputs include `source_company_table_id` and `source_company_domain` when this 
 clay-cpl table list
 clay-cpl table info <table_id>
 clay-cpl table count <table_id>
+clay-cpl table export <table_id> --entity companies --output csv -f companies.csv
 clay-cpl table delete <table_id>
+```
+
+Use `table export` after a detached or timed-out full-mode run completes in Clay:
+
+```bash
+clay-cpl table export <table_id> --entity jobs --output sqlite -f jobs.db
+clay-cpl table export <table_id> --entity people --output json -f people.json
 ```

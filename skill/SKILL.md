@@ -63,11 +63,15 @@ All entity searches support:
 | `--output csv/json/sqlite` | Entity-shaped outputs |
 | `--output-file`, `-f` | Output path |
 | `--cleanup` | Delete generated Clay table/workbook after extraction |
+| `--wait-timeout N` | Seconds to wait for full-mode Clay runs before returning pending |
+| `--detach` | Create the Clay table and exit immediately without waiting |
 | `--quiet`, `-q` | Suppress progress |
 | `--inputs-json` | Exact raw Clay source inputs |
 | `--inputs-file` | JSON file with exact raw Clay source inputs |
 
 Raw inputs replace typed filter construction. Only mode, output, cleanup, and client-side limit remain CLI-controlled.
+
+Full-mode searches persist workbook, table, view, and source IDs to `~/.clay-cpl/runs/` as soon as the Clay table is created. A wait timeout means the remote Clay run is still pending, not failed.
 
 ## Company Table Joins
 
@@ -86,12 +90,14 @@ Outputs include `source_company_table_id` and `source_company_domain` when this 
 clay-cpl table list
 clay-cpl table info <table_id>
 clay-cpl table count <table_id>
+clay-cpl table export <table_id> --entity jobs --output sqlite -f /tmp/jobs.db
 clay-cpl table delete <table_id>
 ```
 
 ## Rules
 
 - Use `--mode full --cleanup` for production searches that must be complete.
+- Use `--detach` or a short `--wait-timeout` for long-running full-mode searches, then export with `table export` after Clay finishes.
 - Use preview for filter validation and small smoke tests.
 - Use `--inputs-json` or `--inputs-file` when exact Clay UI payload parity matters.
 - Do not commit credentials, cookies, session files, workspace-specific artifacts, or exported Clay data.

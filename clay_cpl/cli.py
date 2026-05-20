@@ -11,10 +11,11 @@ from pathlib import Path
 
 from .auth import SessionManager
 from .client import ClayClient
-from .config import CLAY_CPL_DIR, CREDENTIALS_FILE, save_credentials
+from .config import CLAY_CPL_DIR, CREDENTIALS_FILE, DEFAULT_POLL_TIMEOUT, save_credentials
 from .exceptions import ClayAuthError
 from .models import SearchFilters
 from .output import write_csv, write_json, write_sqlite
+from .runs import find_run_manifest_by_table_id, update_run_manifest
 from .search import CompanySearch, JobSearch, KeywordExpander, PeopleSearch
 from .tables import RecordFetcher, TableManager
 
@@ -230,6 +231,10 @@ def _progress(msg):
 
 def cmd_entity_search(args):
     entity = args.entity
+    if args.detach:
+        args.mode = "full"
+    if args.detach and args.cleanup:
+        raise SystemExit("error: --detach cannot be used with --cleanup")
     filters = _build_filters(args, entity)
     identifiers = _load_identifiers(args, entity)
 
@@ -261,8 +266,15 @@ def cmd_entity_search(args):
         limit=args.limit,
         mode=args.mode,
         cleanup=args.cleanup,
+        wait_timeout=args.wait_timeout,
+        detach=args.detach,
         on_progress=on_progress,
     )
+    if result.run_status and result.run_status != "success":
+        if quiet:
+            _print_remote_run_result(result)
+        return
+
     records = result.records
     if filters.raw_inputs is not None and args.limit is not None:
         records = records[: args.limit]
@@ -312,6 +324,39 @@ def cmd_table_info(args):
 
 def cmd_table_count(args):
     print(TableManager(ClayClient()).get_record_count(args.table_id))
+
+
+def cmd_table_export(args):
+    client = ClayClient()
+    manager = TableManager(client)
+    table = manager.get_table(args.table_id)
+    view_id = args.view_id or table.view_id
+    searcher = SEARCH_CLASSES[args.entity](client)
+    if not view_id:
+        raise SystemExit(f"error: no view id found for table {args.table_id}; pass --view-id")
+
+    quiet = getattr(args, "quiet", False)
+    if not quiet:
+        _progress(f"Exporting {args.entity} from table {args.table_id}")
+        _progress(f"  View ID: {view_id}")
+        if table.record_count:
+            _progress(f"  Clay record count: {table.record_count}")
+
+    fetcher = RecordFetcher(client)
+    raw_records = fetcher.fetch_all(args.table_id, view_id, limit=args.limit)
+    field_mapping = manager.get_field_mapping(args.table_id, searcher.field_name_map())
+    records = RecordFetcher.parse_records(raw_records, field_mapping, searcher.RECORD_CLASS)
+    output_path = _write_output(records, args, args.entity)
+    manifest_path = find_run_manifest_by_table_id(args.table_id)
+    update_run_manifest(
+        manifest_path,
+        status="exported",
+        exported_count=len(records),
+        output_format=args.output,
+        output_file=output_path or "",
+    )
+    if not quiet:
+        _progress(f"\nDone. Exported {len(records)} total records.")
 
 
 def cmd_table_delete(args):
@@ -563,18 +608,35 @@ def _write_output(records, args, entity):
         json_str = write_json(records, args.output_file, entity=entity)
         if not args.output_file:
             print(json_str)
+            return None
         elif not quiet:
             _progress(f"Wrote {len(records)} records to {args.output_file}")
+        return str(args.output_file)
     elif args.output == "sqlite":
         output_file = args.output_file or f"clay_{entity}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
         inserted, skipped = write_sqlite(records, output_file, entity=entity)
         if not quiet:
             _progress(f"Wrote {inserted} records to {output_file} ({skipped} duplicates skipped)")
+        return str(output_file)
     else:
         output_file = args.output_file or f"clay_{entity}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         count = write_csv(records, output_file, entity=entity)
         if not quiet:
             _progress(f"Wrote {count} records to {output_file}")
+        return str(output_file)
+
+
+def _print_remote_run_result(result):
+    _progress("Remote Clay run is still pending. No local output was written yet.")
+    _progress(f"  Entity: {result.entity}")
+    _progress(f"  Workbook ID: {result.workbook_id or ''}")
+    _progress(f"  Table ID: {result.table_id or ''}")
+    _progress(f"  View ID: {result.view_id or ''}")
+    _progress(f"  Source ID: {result.source_id or ''}")
+    _progress(f"  Status: {result.run_status}")
+    _progress(f"  Run manifest: {result.manifest_path or ''}")
+    _progress("Export when Clay finishes:")
+    _progress(f"  clay-cpl table export {result.table_id} --entity {result.entity} --output csv")
 
 
 def _add_shared_search_args(parser):
@@ -583,6 +645,8 @@ def _add_shared_search_args(parser):
     parser.add_argument("--output-file", "-f", help="Output file path")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--cleanup", action="store_true", help="Delete Clay table/workbook after extraction")
+    parser.add_argument("--wait-timeout", type=int, default=DEFAULT_POLL_TIMEOUT, help="Seconds to wait for full-mode Clay runs")
+    parser.add_argument("--detach", action="store_true", help="Create the Clay table and exit without waiting")
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress progress output")
     parser.add_argument("--inputs-json", help="Exact raw Clay source inputs JSON object")
     parser.add_argument("--inputs-file", help="File containing exact raw Clay source inputs JSON object")
@@ -687,6 +751,15 @@ def build_parser():
     count_p = table_sub.add_parser("count", help="Get record count")
     count_p.add_argument("table_id")
     count_p.set_defaults(func=cmd_table_count)
+    export_p = table_sub.add_parser("export", help="Export completed table records")
+    export_p.add_argument("table_id")
+    export_p.add_argument("--entity", choices=sorted(SEARCH_CLASSES), required=True)
+    export_p.add_argument("--view-id", help="Table view id; defaults to the table's default view")
+    export_p.add_argument("--output", choices=["csv", "sqlite", "json"], default="csv")
+    export_p.add_argument("--output-file", "-f", help="Output file path")
+    export_p.add_argument("--limit", type=int, default=None)
+    export_p.add_argument("--quiet", "-q", action="store_true", help="Suppress progress output")
+    export_p.set_defaults(func=cmd_table_export)
     del_p = table_sub.add_parser("delete", help="Delete a table")
     del_p.add_argument("table_id")
     del_p.set_defaults(func=cmd_table_delete)

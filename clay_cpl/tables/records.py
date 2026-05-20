@@ -4,7 +4,7 @@ import time
 
 from ..client import ClayClient
 from ..config import BULK_FETCH_BATCH_SIZE
-from ..models import Person
+from ..models import Person, _stringify
 
 
 class RecordFetcher:
@@ -42,9 +42,11 @@ class RecordFetcher:
                 time.sleep(0.1)
         return all_records
 
-    def fetch_all(self, table_id: str, view_id: str) -> list:
+    def fetch_all(self, table_id: str, view_id: str, limit=None) -> list:
         """Convenience: get all record IDs then bulk-fetch them."""
         ids = self.get_record_ids(table_id, view_id)
+        if limit is not None:
+            ids = ids[:limit]
         return self.bulk_fetch(table_id, ids)
 
     @staticmethod
@@ -67,6 +69,6 @@ class RecordFetcher:
             for field_id, col_name in field_mapping.items():
                 cell = cells.get(field_id)
                 if cell is not None:
-                    kwargs[col_name] = cell.get("value", "")
+                    kwargs[col_name] = _stringify(cell.get("value", ""))
             records.append(record_class(**kwargs))
         return records

@@ -13,6 +13,11 @@ Build Clay CPL CLI around Clay's "Companies, People, Jobs" source primitives, wi
   - `clay-cpl jobs search`
 - Shared flags: `--mode`, `--limit`, `--output csv|json|sqlite`, `--output-file/-f`, `--cleanup`, `--quiet`, `--inputs-json`, `--inputs-file`.
 - Raw inputs replace typed filter construction. Output, mode, cleanup, and client-side limit behavior remain CLI-controlled.
+- Full-mode runs persist resumable workbook, table, view, and source IDs under `~/.clay-cpl/runs/`. `--wait-timeout` returns pending instead of failing when Clay is still queued/running, and `--detach` creates the table without waiting.
+- Completed full-mode tables can be exported later:
+  - `clay-cpl table export <table_id> --entity companies --output csv`
+  - `clay-cpl table export <table_id> --entity people --output sqlite`
+  - `clay-cpl table export <table_id> --entity jobs --output json`
 - Add typed filter parity for the current Clay UI action schemas from `actions?workspaceId=<workspace_id>`:
   - Companies: 37 source inputs.
   - People: 48 source inputs, including `job_title_include_past_experiences`, `job_description_include_past_experiences`, and v2 seniority controls.

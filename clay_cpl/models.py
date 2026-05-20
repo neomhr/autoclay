@@ -257,8 +257,11 @@ class SearchResult(Generic[T]):
     mode: str
     entity: str
     table_id: Optional[str] = None
+    view_id: Optional[str] = None
     source_id: Optional[str] = None
     workbook_id: Optional[str] = None
+    run_status: str = ""
+    manifest_path: Optional[str] = None
 
     @property
     def companies(self):

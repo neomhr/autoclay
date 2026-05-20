@@ -9,11 +9,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from clay_cpl import runs
 from clay_cpl.cli import _build_filters, _parse_company_sizes, build_parser
-from clay_cpl.models import CompanyRecord, JobRecord, PersonRecord
+from clay_cpl.models import CompanyRecord, JobRecord, PersonRecord, TableInfo
 from clay_cpl.output import write_csv, write_json, write_sqlite
 from clay_cpl.search import CompanySearch, JobSearch, PeopleSearch
+from clay_cpl.tables.records import RecordFetcher as RealRecordFetcher
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +44,38 @@ class UnitTests(unittest.TestCase):
         for command in ("companies", "people", "jobs"):
             args = parser.parse_args([command, "search", "--mode", "preview", "--limit", "1"])
             self.assertEqual(args.entity, command)
+        args = parser.parse_args(["jobs", "search", "--mode", "full", "--wait-timeout", "3", "--detach"])
+        self.assertEqual(args.wait_timeout, 3)
+        self.assertTrue(args.detach)
+        args = parser.parse_args(["table", "export", "t_123", "--entity", "jobs", "--output", "sqlite"])
+        self.assertEqual(args.table_id, "t_123")
+        self.assertEqual(args.entity, "jobs")
+
+    def test_run_manifest_persists_resume_ids_without_secrets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old_runs_dir = runs.RUNS_DIR
+            runs.RUNS_DIR = Path(tmp)
+            try:
+                path = runs.persist_run_manifest(
+                    entity="jobs",
+                    workspace_id="workspace",
+                    workbook_id="w_123",
+                    table_id="t_123",
+                    view_id="v_123",
+                    source_id="s_123",
+                    status="pending",
+                    wait_timeout=1,
+                    detach=True,
+                )
+            finally:
+                runs.RUNS_DIR = old_runs_dir
+            data = json.loads(path.read_text())
+            self.assertEqual(data["table_id"], "t_123")
+            self.assertEqual(data["view_id"], "v_123")
+            self.assertEqual(data["source_id"], "s_123")
+            self.assertEqual(data["status"], "pending")
+            self.assertNotIn("password", json.dumps(data).lower())
+            self.assertNotIn("cookie", json.dumps(data).lower())
 
     def test_company_size_parser_keeps_backward_compatibility(self):
         self.assertEqual(
@@ -120,6 +155,68 @@ class UnitTests(unittest.TestCase):
                     self.assertEqual(conn.execute(f"select count(*) from clay_{entity}").fetchone()[0], 1)
                 finally:
                     conn.close()
+
+    def test_table_export_uses_entity_parser_and_writers(self):
+        parser, _ = build_parser()
+        with tempfile.TemporaryDirectory() as tmp:
+            old_runs_dir = runs.RUNS_DIR
+            try:
+                runs.RUNS_DIR = Path(tmp) / "runs"
+                output_path = Path(tmp) / "companies.json"
+                manifest_path = runs.persist_run_manifest(
+                    entity="companies",
+                    workspace_id="workspace",
+                    workbook_id="w_123",
+                    table_id="t_123",
+                    view_id="v_123",
+                    source_id="s_123",
+                )
+                args = parser.parse_args([
+                    "table", "export", "t_123",
+                    "--entity", "companies",
+                    "--output", "json",
+                    "--output-file", str(output_path),
+                    "--quiet",
+                ])
+                fake_manager = unittest.mock.Mock()
+                fake_manager.get_table.return_value = TableInfo(table_id="t_123", view_id="v_123", record_count=1)
+                fake_manager.get_field_mapping.return_value = {
+                    "f_name": "name",
+                    "f_domain": "domain",
+                    "f_industries": "industries",
+                }
+                fake_fetcher = unittest.mock.Mock()
+                fake_fetcher.fetch_all.return_value = [{
+                    "cells": {
+                        "f_name": {"value": "Acme"},
+                        "f_domain": {"value": "acme.com"},
+                        "f_industries": {"value": ["Software Development", "AI"]},
+                    }
+                }]
+
+                class FakeRecordFetcher:
+                    parse_records = staticmethod(RealRecordFetcher.parse_records)
+
+                    def __init__(self, client):
+                        pass
+
+                    def fetch_all(self, table_id, view_id, limit=None):
+                        return fake_fetcher.fetch_all(table_id, view_id)
+
+                with patch("clay_cpl.cli.ClayClient"), \
+                        patch("clay_cpl.cli.TableManager", return_value=fake_manager), \
+                        patch("clay_cpl.cli.RecordFetcher", FakeRecordFetcher):
+                    args.func(args)
+            finally:
+                runs.RUNS_DIR = old_runs_dir
+            payload = json.loads(output_path.read_text())
+            self.assertEqual(payload["count"], 1)
+            self.assertEqual(payload["companies"][0]["name"], "Acme")
+            self.assertEqual(payload["companies"][0]["domain"], "acme.com")
+            self.assertEqual(payload["companies"][0]["industries"], "Software Development; AI")
+            manifest = json.loads(manifest_path.read_text())
+            self.assertEqual(manifest["status"], "exported")
+            self.assertEqual(manifest["exported_count"], 1)
 
 
 @unittest.skipUnless(LIVE_WORKSPACE_ID, "CLAY_WORKSPACE_ID is required for live Clay tests")

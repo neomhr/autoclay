@@ -24,10 +24,16 @@ SESSION_COOKIE_MAX_AGE_HOURS = 23
 CLAY_CPL_DIR = Path.home() / ".clay-cpl"
 CREDENTIALS_FILE = CLAY_CPL_DIR / "credentials.json"
 SESSION_FILE = CLAY_CPL_DIR / "session.json"
+RUNS_DIR = CLAY_CPL_DIR / "runs"
 
 
 def ensure_clay_cpl_dir():
     CLAY_CPL_DIR.mkdir(mode=0o700, exist_ok=True)
+
+
+def ensure_runs_dir():
+    ensure_clay_cpl_dir()
+    RUNS_DIR.mkdir(mode=0o700, exist_ok=True)
 
 
 def _load_credentials_file():

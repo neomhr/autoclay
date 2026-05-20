@@ -5,8 +5,9 @@ import time
 
 from ..client import ClayClient
 from ..config import ACTION_PACKAGE_ID, DEFAULT_POLL_INTERVAL, DEFAULT_POLL_TIMEOUT
-from ..exceptions import ClayAPIError, ClayTimeoutError
+from ..exceptions import ClayAPIError
 from ..models import SearchFilters, SearchResult
+from ..runs import persist_run_manifest, update_run_manifest
 from ..tables.manager import TableManager
 from ..tables.records import RecordFetcher
 
@@ -44,6 +45,8 @@ class BaseSearch:
         limit=None,
         mode="auto",
         cleanup=False,
+        wait_timeout=DEFAULT_POLL_TIMEOUT,
+        detach=False,
         on_progress=None,
     ):
         """Run a CPJ search and return a SearchResult."""
@@ -54,7 +57,15 @@ class BaseSearch:
         use_preview = self._resolve_mode(mode, limit)
         if use_preview:
             return self._run_preview(identifiers, filters, limit, on_progress)
-        return self._full_search(identifiers, filters, limit, cleanup, on_progress)
+        return self._full_search(
+            identifiers,
+            filters,
+            limit,
+            cleanup,
+            wait_timeout,
+            detach,
+            on_progress,
+        )
 
     @staticmethod
     def _resolve_mode(mode, limit):
@@ -97,7 +108,7 @@ class BaseSearch:
             entity=self.ENTITY,
         )
 
-    def _full_search(self, identifiers, filters, limit, cleanup, on_progress):
+    def _full_search(self, identifiers, filters, limit, cleanup, wait_timeout, detach, on_progress):
         on_progress("Step 1/6: Creating conversation...")
         conversation_id = self._create_conversation(filters)
 
@@ -111,9 +122,60 @@ class BaseSearch:
         view_id = table_meta["viewId"]
         source_id = table_meta["sourceId"]
         workbook_id = table_meta.get("workbookId")
+        manifest_path = persist_run_manifest(
+            entity=self.ENTITY,
+            workspace_id=self.client.workspace_id,
+            table_id=table_id,
+            view_id=view_id,
+            source_id=source_id,
+            workbook_id=workbook_id,
+            status="pending",
+            wait_timeout=wait_timeout,
+            detach=detach,
+        )
+        on_progress("Remote run created:")
+        on_progress(f"  Workbook ID: {workbook_id or ''}")
+        on_progress(f"  Table ID: {table_id}")
+        on_progress(f"  View ID: {view_id}")
+        on_progress(f"  Source ID: {source_id}")
+        on_progress(f"  Run manifest: {manifest_path}")
+
+        if detach:
+            on_progress("Detached. Remote run is still pending in Clay.")
+            on_progress("Export when Clay finishes:")
+            on_progress(f"  clay-cpl table export {table_id} --entity {self.ENTITY} --output csv")
+            return SearchResult(
+                records=[],
+                total_count=0,
+                mode="full",
+                entity=self.ENTITY,
+                table_id=table_id,
+                view_id=view_id,
+                source_id=source_id,
+                workbook_id=workbook_id,
+                run_status="pending",
+                manifest_path=str(manifest_path),
+            )
 
         on_progress("Step 4/6: Polling for source run completion...")
-        self._poll_source(source_id, on_progress)
+        status = self._poll_source(source_id, wait_timeout, on_progress)
+        if status != "SUCCESS":
+            update_run_manifest(manifest_path, status=status.lower())
+            on_progress(f"Remote run still pending after {wait_timeout}s.")
+            on_progress("No local output was written yet. Export when Clay finishes:")
+            on_progress(f"  clay-cpl table export {table_id} --entity {self.ENTITY} --output csv")
+            return SearchResult(
+                records=[],
+                total_count=0,
+                mode="full",
+                entity=self.ENTITY,
+                table_id=table_id,
+                view_id=view_id,
+                source_id=source_id,
+                workbook_id=workbook_id,
+                run_status=status.lower(),
+                manifest_path=str(manifest_path),
+            )
 
         on_progress("Step 5/6: Fetching records...")
         fetcher = RecordFetcher(self.client)
@@ -131,14 +193,18 @@ class BaseSearch:
                 on_progress("Cleaning up - deleting workbook...")
                 manager.delete_workbook(workbook_id)
 
+        update_run_manifest(manifest_path, status="success")
         return SearchResult(
             records=records,
             total_count=len(records),
             mode="full",
             entity=self.ENTITY,
             table_id=table_id,
+            view_id=view_id,
             source_id=source_id,
             workbook_id=workbook_id,
+            run_status="success",
+            manifest_path=str(manifest_path),
         )
 
     @staticmethod
@@ -203,16 +269,18 @@ class BaseSearch:
         }
         return self.client.post("sources/create-cpj-table", body)
 
-    def _poll_source(self, source_id, on_progress):
-        deadline = time.time() + DEFAULT_POLL_TIMEOUT
+    def _poll_source(self, source_id, wait_timeout, on_progress):
+        deadline = time.time() + wait_timeout
+        last_status = "PENDING"
         while time.time() < deadline:
             resp = self.client.get(f"sources/{source_id}/runs?limit=1")
             runs = resp.get("runs", [])
             if runs:
                 status = runs[0].get("status", "")
+                last_status = status or last_status
                 if status == "SUCCESS":
                     on_progress("Source run completed successfully.")
-                    return
+                    return status
                 if status in ("ERROR", "FAILED"):
                     msg = runs[0].get("message", "Unknown error")
                     raise ClayAPIError(
@@ -223,9 +291,7 @@ class BaseSearch:
                 on_progress(f"  Status: {status} - waiting...")
             time.sleep(DEFAULT_POLL_INTERVAL)
 
-        raise ClayTimeoutError(
-            f"Source run did not complete within {DEFAULT_POLL_TIMEOUT}s"
-        )
+        return last_status
 
     def field_name_map(self):
         return {field["name"]: field["attr"] for field in self.OUTPUT_FIELDS}
