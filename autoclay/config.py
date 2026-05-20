@@ -8,7 +8,7 @@ from pathlib import Path
 CLAY_API_BASE = "https://api.clay.com/v3"
 CLAY_APP_ORIGIN = "https://app.clay.com"
 CLAY_APP_REFERER = "https://app.clay.com/"
-CLAY_FRONTEND_VERSION = "v20260226_193559Z_fc7e8d7d1f"
+CLAY_FRONTEND_VERSION = "v20260518_222738Z_bc4ef1d5e6"
 
 # Workspace
 DEFAULT_WORKSPACE_ID = None

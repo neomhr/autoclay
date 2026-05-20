@@ -96,16 +96,16 @@ class BaseSearch:
             "workspaceId": self.client.workspace_id,
             "enrichmentType": self.PREVIEW_ACTION_KEY,
             "options": {
-                "sync": True,
                 "returnTaskId": True,
                 "returnActionMetadata": True,
             },
             "inputs": self.build_inputs(identifiers, filters, limit, limit_per_company),
         }
 
-        data = self.client.post("actions/run-enrichment", body)
+        data = self.client.post("actions/run-cpj-preview-enrichment", body)
         task_id = data.get("taskId")
-        raw_people = data.get("result", {}).get("people", [])
+        result = data.get("result") or {}
+        raw_people = result.get("people", [])
         people = [self.parse_preview_record(p) for p in raw_people]
         return task_id, people
 
@@ -137,7 +137,8 @@ class BaseSearch:
 
         # Step 2: Run preview for taskId
         on_progress("Step 2/6: Running preview for task ID...")
-        task_id, _ = self._preview_search(identifiers, filters, 50, limit_per_company)
+        preview_limit = min(limit, 50) if limit is not None else 50
+        task_id, _ = self._preview_search(identifiers, filters, preview_limit, limit_per_company)
 
         # Step 3: Create table
         on_progress("Step 3/6: Creating table...")
@@ -147,6 +148,7 @@ class BaseSearch:
         table_id = table_meta["tableId"]
         view_id = table_meta["viewId"]
         source_id = table_meta["sourceId"]
+        workbook_id = table_meta.get("workbookId")
 
         # Step 4: Poll for completion
         on_progress("Step 4/6: Polling for source run completion...")
@@ -160,6 +162,7 @@ class BaseSearch:
         raw_records = fetcher.fetch_all(table_id, view_id)
         field_mapping = manager.get_field_mapping(table_id)
         people = RecordFetcher.parse_records(raw_records, field_mapping)
+        people = self._apply_client_limits(people, limit, limit_per_company)
         total_count = len(people)
 
         on_progress(f"Step 6/6: Fetched {total_count} records.")
@@ -168,6 +171,9 @@ class BaseSearch:
         if cleanup:
             on_progress("Cleaning up — deleting table...")
             manager.delete_table(table_id)
+            if workbook_id:
+                on_progress("Cleaning up — deleting workbook...")
+                manager.delete_workbook(workbook_id)
 
         return SearchResult(
             people=people,
@@ -175,17 +181,45 @@ class BaseSearch:
             mode="full",
             table_id=table_id,
             source_id=source_id,
+            workbook_id=workbook_id,
         )
+
+    @staticmethod
+    def _apply_client_limits(people, limit, limit_per_company):
+        """Apply CLI limits after fetch as a guard against API limit drift."""
+        if limit_per_company is not None:
+            per_company_counts = {}
+            limited = []
+            for person in people:
+                key = (person.company_domain or "").lower()
+                current = per_company_counts.get(key, 0)
+                if current >= limit_per_company:
+                    continue
+                per_company_counts[key] = current + 1
+                limited.append(person)
+            people = limited
+
+        if limit is not None:
+            people = people[:limit]
+
+        return people
 
     def _create_conversation(self):
         """Step 1: Create an AI onboarding conversation."""
+        inputs = self.build_inputs([], SearchFilters(), None)
         body = {
             "conversationType": "ai_onboarding",
             "initialSourceState": {
                 "sourceType": self.SOURCE_TYPE,
                 "sourceConfig": {
-                    "type": self.SOURCE_TYPE,
-                    "inputs": self.build_inputs([], SearchFilters(), None),
+                    "type": "search",
+                    "entityType": self.SOURCE_TYPE,
+                    "mode": "filters",
+                    "filters": inputs,
+                    "additionalRequirements": [],
+                    "originalQuery": "",
+                    "createdAt": time.time(),
+                    "lastModifiedAt": time.time(),
                 },
             },
         }

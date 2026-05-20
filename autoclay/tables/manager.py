@@ -1,6 +1,7 @@
 """Table management — list, inspect, delete Clay tables."""
 
 from ..client import ClayClient
+from ..exceptions import ClayAPIError
 from ..models import TableInfo
 
 
@@ -24,7 +25,13 @@ class TableManager:
 
     def list_tables(self) -> list:
         """Return all tables in the workspace as TableInfo objects."""
-        resp = self.client.get(f"tables?workspaceId={self.client.workspace_id}")
+        try:
+            resp = self.client.get(f"tables?workspaceId={self.client.workspace_id}")
+        except ClayAPIError as e:
+            if e.status_code != 403:
+                raise
+            return self.list_workbooks()
+
         tables = []
         for t in resp:
             tables.append(
@@ -34,6 +41,31 @@ class TableManager:
                     record_count=t.get("totalRecordsCount", 0),
                     view_id=t.get("defaultViewId", ""),
                     workbook_id=t.get("workbookId", ""),
+                )
+            )
+        return tables
+
+    def list_workbooks(self) -> list:
+        """Return visible workbooks when the admin-only table list is forbidden."""
+        resp = self.client.post(
+            f"workspaces/{self.client.workspace_id}/resources_v2/",
+            {
+                "parentResource": None,
+                "filters": {},
+                "isGlobalSearch": False,
+            },
+        )
+        tables = []
+        for r in resp.get("resources", []):
+            if r.get("resourceType") != "WORKBOOK":
+                continue
+            tables.append(
+                TableInfo(
+                    table_id=r.get("id", ""),
+                    name=r.get("name", ""),
+                    record_count=0,
+                    view_id="",
+                    workbook_id=r.get("id", ""),
                 )
             )
         return tables
@@ -58,6 +90,10 @@ class TableManager:
     def delete_table(self, table_id: str) -> None:
         """Delete a table by ID."""
         self.client.delete(f"tables/{table_id}")
+
+    def delete_workbook(self, workbook_id: str) -> None:
+        """Delete a workbook by ID."""
+        self.client.delete(f"workbooks/{workbook_id}")
 
     def get_field_mapping(self, table_id: str) -> dict:
         """Build a mapping of field_id -> our column name for known fields.

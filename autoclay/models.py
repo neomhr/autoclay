@@ -87,6 +87,7 @@ class SearchResult:
     mode: str  # "preview" or "full"
     table_id: Optional[str] = None
     source_id: Optional[str] = None
+    workbook_id: Optional[str] = None
 
 
 @dataclass

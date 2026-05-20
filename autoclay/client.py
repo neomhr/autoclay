@@ -59,6 +59,12 @@ class ClayClient:
                 status_code=e.code,
                 response_body=error_body,
             )
+        except urllib.error.URLError as e:
+            raise ClayAPIError(
+                f"Network error: {e.reason}",
+                status_code=None,
+                response_body=str(e.reason),
+            )
 
     def request(self, method, path, body=None):
         """Make an HTTP request with auth, retries, and 401 re-login.
