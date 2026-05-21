@@ -7,14 +7,14 @@ This is a CLI-first project. The Python package exists as the implementation lay
 ## Quick Install
 
 ```bash
-curl -sSf https://raw.githubusercontent.com/neomhr/autoclay/main/install.sh | bash
+curl -sSf https://raw.githubusercontent.com/neomhr/clay-cpj-cli/main/install.sh | bash
 clay-cpj setup
 ```
 
 Manual install:
 
 ```bash
-git clone https://github.com/neomhr/autoclay.git clay-cpj
+git clone https://github.com/neomhr/clay-cpj-cli.git clay-cpj
 cd clay-cpj
 pip install -e .
 clay-cpj setup

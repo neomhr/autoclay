@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Clay CPJ CLI installer
-# Usage: curl -sSf https://raw.githubusercontent.com/neomhr/autoclay/main/install.sh | bash
+# Usage: curl -sSf https://raw.githubusercontent.com/neomhr/clay-cpj-cli/main/install.sh | bash
 
 CLAY_CPJ_DIR="$HOME/.clay-cpj"
 OLD_CLAY_CPL_DIR="$HOME/.clay-cpl"
@@ -10,7 +10,7 @@ SRC_DIR="$CLAY_CPJ_DIR/src"
 SKILL_LINK="$HOME/.claude/skills/clay-cpj"
 OLD_CPL_SKILL_LINK="$HOME/.claude/skills/clay-cpl"
 OLD_AUTOCLAY_SKILL_LINK="$HOME/.claude/skills/autoclay"
-REPO_URL="https://github.com/neomhr/autoclay.git"
+REPO_URL="https://github.com/neomhr/clay-cpj-cli.git"
 
 banner() {
     echo ""
