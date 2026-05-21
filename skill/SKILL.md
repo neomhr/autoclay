@@ -1,29 +1,29 @@
 ---
-name: clay-cpl
-description: Use this skill when the user wants to search Clay companies, people, or jobs via Clay CPL CLI, build lead/account/job lists, run Clay source searches, export results, or inspect Clay tables.
+name: clay-cpj
+description: Use this skill when the user wants to search Clay companies, people, or jobs via Clay CPJ CLI, build lead/account/job lists, run Clay source searches, export results, or inspect Clay tables.
 user-invocable: true
 ---
 
-# Clay CPL CLI Skill
+# Clay CPJ CLI Skill
 
-Clay CPL CLI is a local CLI wrapper around Clay's Companies, People, Jobs source APIs.
+Clay CPJ CLI is a local CLI wrapper around Clay's Companies, People, Jobs source APIs.
 
 It supports:
 
 ```bash
-clay-cpl companies search ...
-clay-cpl people search ...
-clay-cpl jobs search ...
+clay-cpj companies search ...
+clay-cpj people search ...
+clay-cpj jobs search ...
 ```
 
-Credentials and sessions are stored locally in `~/.clay-cpl/credentials.json` and `~/.clay-cpl/session.json`. Set `CLAY_WORKSPACE_ID` explicitly for workspace-specific work.
+Credentials and sessions are stored locally in `~/.clay-cpj/credentials.json` and `~/.clay-cpj/session.json`. Set `CLAY_WORKSPACE_ID` explicitly for workspace-specific work.
 
 ## Search Commands
 
 ### Companies
 
 ```bash
-clay-cpl companies search \
+clay-cpj companies search \
   --countries "United States" \
   --industries "Software Development" \
   --limit 25 \
@@ -33,7 +33,7 @@ clay-cpl companies search \
 ### People
 
 ```bash
-clay-cpl people search \
+clay-cpj people search \
   --domains "openai.com,anthropic.com" \
   --title-keywords "Engineer,Developer Advocate" \
   --mode full \
@@ -45,7 +45,7 @@ clay-cpl people search \
 ### Jobs
 
 ```bash
-clay-cpl jobs search \
+clay-cpj jobs search \
   --domains openai.com \
   --title-keywords Engineer \
   --max-num-days-since-posted 30 \
@@ -71,15 +71,15 @@ All entity searches support:
 
 Raw inputs replace typed filter construction. Only mode, output, cleanup, and client-side limit remain CLI-controlled.
 
-Full-mode searches persist workbook, table, view, and source IDs to `~/.clay-cpl/runs/` as soon as the Clay table is created. A wait timeout means the remote Clay run is still pending, not failed.
+Full-mode searches persist workbook, table, view, and source IDs to `~/.clay-cpj/runs/` as soon as the Clay table is created. A wait timeout means the remote Clay run is still pending, not failed.
 
 ## Company Table Joins
 
 People and jobs can start from an existing Clay company table by extracting domains:
 
 ```bash
-clay-cpl people search --from-company-table t_xxx --company-domain-field Domain --title-keywords CEO
-clay-cpl jobs search --from-company-table t_xxx --company-domain-field Domain --title-keywords Engineer
+clay-cpj people search --from-company-table t_xxx --company-domain-field Domain --title-keywords CEO
+clay-cpj jobs search --from-company-table t_xxx --company-domain-field Domain --title-keywords Engineer
 ```
 
 Outputs include `source_company_table_id` and `source_company_domain` when this join path is used.
@@ -87,11 +87,11 @@ Outputs include `source_company_table_id` and `source_company_domain` when this 
 ## Table Commands
 
 ```bash
-clay-cpl table list
-clay-cpl table info <table_id>
-clay-cpl table count <table_id>
-clay-cpl table export <table_id> --entity jobs --output sqlite -f /tmp/jobs.db
-clay-cpl table delete <table_id>
+clay-cpj table list
+clay-cpj table info <table_id>
+clay-cpj table count <table_id>
+clay-cpj table export <table_id> --entity jobs --output sqlite -f /tmp/jobs.db
+clay-cpj table delete <table_id>
 ```
 
 ## Rules

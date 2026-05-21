@@ -1,4 +1,4 @@
-"""Clay CPL CLI - argparse dispatcher."""
+"""Clay CPJ CLI - argparse dispatcher."""
 
 import argparse
 import csv
@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .auth import SessionManager
 from .client import ClayClient
-from .config import CLAY_CPL_DIR, CREDENTIALS_FILE, DEFAULT_POLL_TIMEOUT, save_credentials
+from .config import CLAY_CPJ_DIR, CREDENTIALS_FILE, DEFAULT_POLL_TIMEOUT, save_credentials
 from .exceptions import ClayAuthError
 from .models import SearchFilters
 from .output import write_csv, write_json, write_sqlite
@@ -394,7 +394,7 @@ def cmd_keywords_expand(args):
 
 def cmd_setup(args):
     print()
-    print("Clay CPL CLI Setup")
+    print("Clay CPJ CLI Setup")
     print()
 
     existing_email = None
@@ -407,7 +407,7 @@ def cmd_setup(args):
     if existing_email:
         overwrite = input(f"Overwrite existing credentials ({existing_email})? [y/N] ").strip().lower()
         if overwrite not in ("y", "yes"):
-            print("Keeping existing credentials. Run 'clay-cpl auth status' to check session.")
+            print("Keeping existing credentials. Run 'clay-cpj auth status' to check session.")
             return
     try:
         email = input("Email: ").strip()
@@ -439,7 +439,7 @@ def cmd_setup(args):
 
 
 def _find_source_dir():
-    standard = CLAY_CPL_DIR / "src"
+    standard = CLAY_CPJ_DIR / "src"
     if (standard / ".git").is_dir():
         return standard
     pkg_root = Path(__file__).resolve().parent.parent
@@ -451,7 +451,7 @@ def _find_source_dir():
 def cmd_update(args):
     src_dir = _find_source_dir()
     if not src_dir:
-        print("Error: Cannot find Clay CPL CLI source directory.", file=sys.stderr)
+        print("Error: Cannot find Clay CPJ CLI source directory.", file=sys.stderr)
         print("If you installed manually, cd into the repo and run: git pull", file=sys.stderr)
         sys.exit(1)
 
@@ -636,7 +636,7 @@ def _print_remote_run_result(result):
     _progress(f"  Status: {result.run_status}")
     _progress(f"  Run manifest: {result.manifest_path or ''}")
     _progress("Export when Clay finishes:")
-    _progress(f"  clay-cpl table export {result.table_id} --entity {result.entity} --output csv")
+    _progress(f"  clay-cpj table export {result.table_id} --entity {result.entity} --output csv")
 
 
 def _add_shared_search_args(parser):
@@ -717,7 +717,7 @@ def _add_job_alias_args(parser):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(prog="clay-cpl", description="Clay CPL CLI")
+    parser = argparse.ArgumentParser(prog="clay-cpj", description="Clay CPJ CLI")
     sub = parser.add_subparsers(dest="command")
 
     subparsers = {}
@@ -783,7 +783,7 @@ def build_parser():
     setup_p = sub.add_parser("setup", help="Interactive setup wizard")
     setup_p.set_defaults(func=cmd_setup)
 
-    update_p = sub.add_parser("update", help="Update Clay CPL CLI to latest version")
+    update_p = sub.add_parser("update", help="Update Clay CPJ CLI to latest version")
     update_p.set_defaults(func=cmd_update)
 
     return parser, subparsers

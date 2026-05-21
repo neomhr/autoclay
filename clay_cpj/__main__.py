@@ -1,4 +1,4 @@
-"""Enable `python -m clay_cpl` CLI invocation."""
+"""Enable `python -m clay_cpj` CLI invocation."""
 
 from .cli import main
 

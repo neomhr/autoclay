@@ -16,7 +16,7 @@ from .config import (
     CLAY_API_BASE,
     SESSION_COOKIE_MAX_AGE_HOURS,
     SESSION_FILE,
-    ensure_clay_cpl_dir,
+    ensure_clay_cpj_dir,
     get_credentials,
     get_session_cookie,
 )
@@ -62,7 +62,7 @@ class SessionManager:
         if not self._cookie:
             return
         try:
-            ensure_clay_cpl_dir()
+            ensure_clay_cpj_dir()
             SESSION_FILE.write_text(json.dumps({"cookie": self._cookie, "expiry": self._expiry}) + "\n")
             SESSION_FILE.chmod(0o600)
         except OSError:

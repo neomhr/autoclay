@@ -143,7 +143,7 @@ class BaseSearch:
         if detach:
             on_progress("Detached. Remote run is still pending in Clay.")
             on_progress("Export when Clay finishes:")
-            on_progress(f"  clay-cpl table export {table_id} --entity {self.ENTITY} --output csv")
+            on_progress(f"  clay-cpj table export {table_id} --entity {self.ENTITY} --output csv")
             return SearchResult(
                 records=[],
                 total_count=0,
@@ -163,7 +163,7 @@ class BaseSearch:
             update_run_manifest(manifest_path, status=status.lower())
             on_progress(f"Remote run still pending after {wait_timeout}s.")
             on_progress("No local output was written yet. Export when Clay finishes:")
-            on_progress(f"  clay-cpl table export {table_id} --entity {self.ENTITY} --output csv")
+            on_progress(f"  clay-cpj table export {table_id} --entity {self.ENTITY} --output csv")
             return SearchResult(
                 records=[],
                 total_count=0,

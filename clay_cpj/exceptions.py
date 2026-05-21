@@ -1,8 +1,8 @@
-"""Clay CPL CLI exceptions."""
+"""Clay CPJ CLI exceptions."""
 
 
 class ClayError(Exception):
-    """Base exception for Clay CPL CLI."""
+    """Base exception for Clay CPJ CLI."""
 
 
 class ClayAuthError(ClayError):

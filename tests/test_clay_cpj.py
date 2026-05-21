@@ -1,4 +1,4 @@
-"""Clay CPL CLI Companies/People/Jobs regression tests."""
+"""Clay CPJ CLI Companies/People/Jobs regression tests."""
 
 import csv
 import json
@@ -11,12 +11,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from clay_cpl import runs
-from clay_cpl.cli import _build_filters, _parse_company_sizes, build_parser
-from clay_cpl.models import CompanyRecord, JobRecord, PersonRecord, TableInfo
-from clay_cpl.output import write_csv, write_json, write_sqlite
-from clay_cpl.search import CompanySearch, JobSearch, PeopleSearch
-from clay_cpl.tables.records import RecordFetcher as RealRecordFetcher
+from clay_cpj import runs
+from clay_cpj.cli import _build_filters, _parse_company_sizes, build_parser
+from clay_cpj.models import CompanyRecord, JobRecord, PersonRecord, TableInfo
+from clay_cpj.output import write_csv, write_json, write_sqlite
+from clay_cpj.search import CompanySearch, JobSearch, PeopleSearch
+from clay_cpj.tables.records import RecordFetcher as RealRecordFetcher
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,7 +26,7 @@ LIVE_WORKSPACE_ID = os.environ.get("CLAY_WORKSPACE_ID")
 def run_cli(*args, timeout=180):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT)
-    cmd = [sys.executable, "-m", "clay_cpl", *args]
+    cmd = [sys.executable, "-m", "clay_cpj", *args]
     return subprocess.run(
         cmd,
         cwd=ROOT,
@@ -40,7 +40,7 @@ def run_cli(*args, timeout=180):
 class UnitTests(unittest.TestCase):
     def test_commands_are_wired(self):
         parser, _ = build_parser()
-        self.assertEqual(parser.prog, "clay-cpl")
+        self.assertEqual(parser.prog, "clay-cpj")
         for command in ("companies", "people", "jobs"):
             args = parser.parse_args([command, "search", "--mode", "preview", "--limit", "1"])
             self.assertEqual(args.entity, command)
@@ -203,9 +203,9 @@ class UnitTests(unittest.TestCase):
                     def fetch_all(self, table_id, view_id, limit=None):
                         return fake_fetcher.fetch_all(table_id, view_id)
 
-                with patch("clay_cpl.cli.ClayClient"), \
-                        patch("clay_cpl.cli.TableManager", return_value=fake_manager), \
-                        patch("clay_cpl.cli.RecordFetcher", FakeRecordFetcher):
+                with patch("clay_cpj.cli.ClayClient"), \
+                        patch("clay_cpj.cli.TableManager", return_value=fake_manager), \
+                        patch("clay_cpj.cli.RecordFetcher", FakeRecordFetcher):
                     args.func(args)
             finally:
                 runs.RUNS_DIR = old_runs_dir

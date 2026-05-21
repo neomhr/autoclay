@@ -1,16 +1,16 @@
-"""Internal Python API for the Clay CPL CLI.
+"""Internal Python API for the Clay CPJ CLI.
 
 Usage (programmatic):
-    from clay_cpl import ClayClient, PeopleSearch, SearchFilters
+    from clay_cpj import ClayClient, PeopleSearch, SearchFilters
 
     client = ClayClient()
     ps = PeopleSearch(client)
     result = ps.search(["acme.com"], filters=SearchFilters(seniority_levels=["vp"]))
 
 Usage (CLI):
-    clay-cpl people search --domains acme.com
-    clay-cpl table list
-    clay-cpl auth login
+    clay-cpj people search --domains acme.com
+    clay-cpj table list
+    clay-cpj auth login
 """
 
 from .client import ClayClient

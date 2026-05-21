@@ -1,4 +1,4 @@
-"""Clay CPL CLI configuration."""
+"""Clay CPJ CLI configuration."""
 
 import json
 import os
@@ -21,18 +21,18 @@ MAX_RETRIES = 3
 RETRY_BACKOFF = [1, 2, 4]
 SESSION_COOKIE_MAX_AGE_HOURS = 23
 
-CLAY_CPL_DIR = Path.home() / ".clay-cpl"
-CREDENTIALS_FILE = CLAY_CPL_DIR / "credentials.json"
-SESSION_FILE = CLAY_CPL_DIR / "session.json"
-RUNS_DIR = CLAY_CPL_DIR / "runs"
+CLAY_CPJ_DIR = Path.home() / ".clay-cpj"
+CREDENTIALS_FILE = CLAY_CPJ_DIR / "credentials.json"
+SESSION_FILE = CLAY_CPJ_DIR / "session.json"
+RUNS_DIR = CLAY_CPJ_DIR / "runs"
 
 
-def ensure_clay_cpl_dir():
-    CLAY_CPL_DIR.mkdir(mode=0o700, exist_ok=True)
+def ensure_clay_cpj_dir():
+    CLAY_CPJ_DIR.mkdir(mode=0o700, exist_ok=True)
 
 
 def ensure_runs_dir():
-    ensure_clay_cpl_dir()
+    ensure_clay_cpj_dir()
     RUNS_DIR.mkdir(mode=0o700, exist_ok=True)
 
 
@@ -46,7 +46,7 @@ def _load_credentials_file():
 
 
 def save_credentials(email, password, workspace_id):
-    ensure_clay_cpl_dir()
+    ensure_clay_cpj_dir()
     CREDENTIALS_FILE.write_text(
         json.dumps({"email": email, "password": password, "workspace_id": workspace_id}, indent=2) + "\n"
     )
@@ -57,7 +57,7 @@ def get_workspace_id():
     workspace_id = os.environ.get("CLAY_WORKSPACE_ID") or _load_credentials_file().get("workspace_id")
     if not workspace_id:
         raise RuntimeError(
-            "CLAY_WORKSPACE_ID is not set. Run 'clay-cpl setup' or set the environment variable."
+            "CLAY_WORKSPACE_ID is not set. Run 'clay-cpj setup' or set the environment variable."
         )
     return str(workspace_id)
 
