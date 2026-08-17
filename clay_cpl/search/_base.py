@@ -89,6 +89,15 @@ class BaseSearch:
             "inputs": self.build_inputs(identifiers, filters, limit),
         }
 
+        # Bei raw_inputs steht das VOLLE Limit in den Inputs. Die
+        # Preview-Action lehnt limit > 50 mit ERROR_INVALID_INPUT ab - der
+        # Task sieht dann gesund aus, ist aber leer, und der spaetere
+        # Tabellen-Import faellt still auf "0 aus der Preview" zurueck.
+        # (Ursache des dokumentierten Stumm-0-Defekts, 2026-08-17.)
+        if body["inputs"].get("limit") is not None and \
+                (limit is None or body["inputs"]["limit"] != limit):
+            body["inputs"] = {**body["inputs"], "limit": min(limit or 50, 50)}
+
         data = self.client.post("actions/run-cpj-preview-enrichment", body)
         task_id = data.get("taskId")
         result = data.get("result") or {}
@@ -114,7 +123,14 @@ class BaseSearch:
 
         on_progress("Step 2/6: Running preview for task ID...")
         preview_limit = min(limit, 50) if limit is not None else 50
-        task_id, _, _ = self._preview_search(identifiers, filters, preview_limit)
+        task_id, preview_records, _ = self._preview_search(
+            identifiers, filters, preview_limit)
+        # Der Server-Run schoepft aus diesem Task. Ist er kaputt oder leer,
+        # wird der Import still zu 0 Zeilen mit Status SUCCESS. Deshalb hier
+        # pruefen und LAUT abbrechen - eine leere Preview bei gesunden
+        # Filtern heisst fast immer: Filterwert existiert nicht mehr in der
+        # aktuellen Taxonomie (z. B. alte LinkedIn-Industrienamen).
+        self._assert_preview_healthy(task_id, preview_records, on_progress)
 
         on_progress("Step 3/6: Creating table...")
         table_meta = self._create_table(identifiers, filters, limit, conversation_id, task_id)
@@ -269,6 +285,26 @@ class BaseSearch:
         }
         return self.client.post("sources/create-cpj-table", body)
 
+    def _assert_preview_healthy(self, task_id, records, on_progress):
+        if records:
+            return
+        detail = ""
+        try:
+            t = self.client.get(f"actions/tasks/{task_id}")
+            md = ((t.get("output") or {}).get("metadata") or {})
+            detail = md.get("status") or t.get("status") or ""
+        except Exception:
+            pass
+        raise ClayAPIError(
+            "Preview lieferte 0 Ergebnisse"
+            + (f" (Task-Status: {detail})" if detail else "")
+            + ". Abbruch VOR dem Tabellenbau - ein Import aus einer leeren "
+            "Preview ergaebe still 0 Zeilen mit Status SUCCESS. Haeufigste "
+            "Ursachen: Filterwert existiert nicht (mehr) in der aktuellen "
+            "Taxonomie, oder die Filter matchen wirklich nichts. Gegenprobe: "
+            "gleiche Suche mit --mode preview.",
+            status_code=None, response_body=detail)
+
     def _poll_source(self, source_id, wait_timeout, on_progress):
         deadline = time.time() + wait_timeout
         last_status = "PENDING"
@@ -279,7 +315,17 @@ class BaseSearch:
                 status = runs[0].get("status", "")
                 last_status = status or last_status
                 if status == "SUCCESS":
-                    on_progress("Source run completed successfully.")
+                    added = runs[0].get("numberOfRowsAdded")
+                    msg = runs[0].get("statusMessage") or ""
+                    on_progress(f"Source run completed: {msg}")
+                    if added == 0:
+                        raise ClayAPIError(
+                            "Source-Run meldet SUCCESS, hat aber 0 Zeilen "
+                            f"geschrieben ('{msg}'). Das ist der bekannte "
+                            "Stumm-0-Modus: der Import ist auf die Preview "
+                            "zurueckgefallen statt die Suche auszufuehren. "
+                            "NICHT als leeres Suchergebnis interpretieren.",
+                            status_code=None, response_body=msg)
                     return status
                 if status in ("ERROR", "FAILED"):
                     msg = runs[0].get("message", "Unknown error")

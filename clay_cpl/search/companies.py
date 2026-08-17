@@ -1,7 +1,17 @@
 """Company search via Clay's Companies, People, Jobs source."""
 
+import difflib
+import json
+import os
+import time
+
+from ..enums import SIZE_LABEL_TO_CODE, SIZE_CODE_TO_LABEL
+from ..exceptions import ClayAPIError
 from ..models import CompanyRecord, _stringify
 from ._base import BaseSearch
+
+_SCHEMA_CACHE = os.path.expanduser("~/.clay-cpl/cache/companies-action-schema.json")
+_SCHEMA_TTL = 7 * 24 * 3600
 
 
 class CompanySearch(BaseSearch):
@@ -49,10 +59,65 @@ class CompanySearch(BaseSearch):
         for field in OUTPUT_FIELDS
     ]
 
+    def _action_schema(self):
+        """Gueltige Filterwerte der Company-Action, 7 Tage gecacht. Die
+        Taxonomie hat sich schon einmal still geaendert (alte
+        LinkedIn-Industrienamen matchen auf 0) - deshalb live von der API
+        statt hartkodiert."""
+        try:
+            if os.path.exists(_SCHEMA_CACHE) and \
+                    time.time() - os.path.getmtime(_SCHEMA_CACHE) < _SCHEMA_TTL:
+                return json.load(open(_SCHEMA_CACHE))
+        except Exception:
+            pass
+        r = self.client.get(f"actions?workspaceId={self.client.workspace_id}")
+        items = r if isinstance(r, list) else r.get("actions") or []
+        a = next((x for x in items if x.get("key") == self.ACTION_KEY), None)
+        schema = {}
+        for par in (a or {}).get("inputParameterSchema") or []:
+            opts = [o.get("value") for o in par.get("options") or []]
+            if opts:
+                schema[par["name"]] = opts
+        try:
+            os.makedirs(os.path.dirname(_SCHEMA_CACHE), exist_ok=True)
+            json.dump(schema, open(_SCHEMA_CACHE, "w"))
+        except Exception:
+            pass
+        return schema
+
+    def _validate_inputs(self, inputs):
+        schema = self._action_schema()
+        for feld in ("industries", "industries_exclude", "sizes",
+                     "country_names", "derived_industries"):
+            werte = inputs.get(feld)
+            gueltig = schema.get(feld)
+            if not werte or not gueltig:
+                continue
+            falsch = [w for w in werte if w not in gueltig]
+            if falsch:
+                tipps = []
+                for w in falsch[:3]:
+                    n = difflib.get_close_matches(w, gueltig, n=2, cutoff=0.4)
+                    if n:
+                        tipps.append(f"{w!r} -> vielleicht {n}")
+                raise ClayAPIError(
+                    f"Ungueltige Werte in '{feld}': {falsch[:5]}. Die Server-"
+                    f"Suche matcht unbekannte Werte STUMM auf 0 Zeilen. "
+                    + ("Aehnlich: " + "; ".join(tipps) if tipps else
+                       f"Gueltige Beispiele: {gueltig[:5]}"),
+                    status_code=None, response_body=str(falsch))
+
     def build_inputs(self, identifiers, filters, limit):
         if filters.raw_inputs is not None:
-            return dict(filters.raw_inputs)
-        return {
+            inputs = dict(filters.raw_inputs)
+            # Groessen-Label stillschweigend in die Codes uebersetzen, die
+            # die Company-Source verlangt - sonst 0 Treffer ohne Fehler.
+            if inputs.get("sizes"):
+                inputs["sizes"] = [
+                    SIZE_LABEL_TO_CODE.get(x, x) for x in inputs["sizes"]]
+            self._validate_inputs(inputs)
+            return inputs
+        inputs = {
             "startFromCompanyType": "semantic_description",
             "country_names": filters.country_names,
             "country_names_exclude": filters.country_names_exclude,
@@ -92,6 +157,8 @@ class CompanySearch(BaseSearch):
             "resolved_domain_redirects": filters.resolved_domain_redirects[0] if filters.resolved_domain_redirects else None,
             "limit": limit,
         }
+        self._validate_inputs(inputs)
+        return inputs
 
     def parse_preview_record(self, raw):
         return CompanyRecord(

@@ -50,6 +50,15 @@ JOB_FUNCTIONS = [
 
 JOB_TITLE_MODES = ["smart", "contain", "exact"]
 
+# Company-Source: Bucket-CODES; People-Source: LABELS.
+# 2026-08-17 gegen die inputParameterSchema beider Actions verifiziert.
+SIZE_CODE_TO_LABEL = {
+    "1": "1", "2": "2-10", "10": "11-50", "50": "51-200", "200": "201-500",
+    "500": "501-1,000", "1000": "1,001-5,000", "5000": "5,001-10,000",
+    "10000": "10,001+",
+}
+SIZE_LABEL_TO_CODE = {v: k for k, v in SIZE_CODE_TO_LABEL.items()}
+
 COMPANY_SIZES = [
     "1",
     "2-10",

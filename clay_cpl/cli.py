@@ -481,10 +481,15 @@ def _split(val):
     return [v.strip() for v in str(val).split(",") if v.strip()]
 
 
+# Die COMPANY-Source erwartet seit der Taxonomie-Umstellung Bucket-CODES
+# ("50" fuer 51-200), die PEOPLE-Source weiterhin LABEL ("51-200") - beides
+# 2026-08-17 gegen die inputParameterSchema der Actions verifiziert. Ein
+# falsches Format matcht serverseitig STUMM auf null Zeilen.
 _COMPANY_SIZE_TOKENS = [
     "10,001+", "5,001-10,000", "1,001-5,000", "501-1,000",
     "10001+", "5001-10000", "1001-5000", "501-1000",
-    "201-500", "51-200", "11-50", "2-10", "1",
+    "201-500", "51-200", "11-50", "2-10",
+    "10000", "5000", "1000", "500", "200", "50", "10", "2", "1",
 ]
 _COMPANY_SIZE_FREE_TO_CANONICAL = {
     "10001+": "10,001+",
@@ -492,16 +497,30 @@ _COMPANY_SIZE_FREE_TO_CANONICAL = {
     "1001-5000": "1,001-5,000",
     "501-1000": "501-1,000",
 }
+_CODE_TO_LABEL = {
+    "1": "1", "2": "2-10", "10": "11-50", "50": "51-200", "200": "201-500",
+    "500": "501-1,000", "1000": "1,001-5,000", "5000": "5,001-10,000",
+    "10000": "10,001+",
+}
+_LABEL_TO_CODE = {v: k for k, v in _CODE_TO_LABEL.items()}
 
 
-def _parse_company_sizes(val):
-    """Parse Clay company size labels, accepting comma-free thousands."""
+def _parse_company_sizes(val, target="labels"):
+    """Groessen-Angaben parsen und ins Zielformat der jeweiligen Source
+    uebersetzen. Akzeptiert Label ("51-200", auch ohne Tausender-Komma) UND
+    Codes ("50"). target="codes" fuer die Company-Source, "labels" fuer die
+    People-Source."""
     s = str(val).strip()
     out = []
     while s:
         for token in _COMPANY_SIZE_TOKENS:
             if s.startswith(token):
-                out.append(_COMPANY_SIZE_FREE_TO_CANONICAL.get(token, token))
+                kanon = _COMPANY_SIZE_FREE_TO_CANONICAL.get(token, token)
+                if kanon in _CODE_TO_LABEL:          # Eingabe war ein Code
+                    label = _CODE_TO_LABEL[kanon]
+                else:
+                    label = kanon
+                out.append(_LABEL_TO_CODE[label] if target == "codes" else label)
                 s = s[len(token):].lstrip(", \t")
                 break
         else:
@@ -550,13 +569,21 @@ def _build_filters(args, entity="people"):
         attr = FILTER_ATTRS.get(field, field)
         raw = getattr(args, field, None)
         if raw is not None:
-            kw[attr] = _parse_company_sizes(raw) if field in ("company_sizes", "sizes") else _coerce(raw, kind)
+            if field in ("company_sizes", "sizes"):
+                ziel = "codes" if entity == "companies" else "labels"
+                kw[attr] = _parse_company_sizes(raw, ziel)
+            else:
+                kw[attr] = _coerce(raw, kind)
 
     for alias, (field, kind) in ALIASES.get(entity, {}).items():
         raw = getattr(args, alias, None)
         if raw is not None and raw is not False:
             attr = FILTER_ATTRS.get(field, field)
-            kw[attr] = _parse_company_sizes(raw) if field in ("company_sizes", "sizes") else _coerce(raw, kind)
+            if field in ("company_sizes", "sizes"):
+                ziel = "codes" if entity == "companies" else "labels"
+                kw[attr] = _parse_company_sizes(raw, ziel)
+            else:
+                kw[attr] = _coerce(raw, kind)
 
     if entity == "people" and getattr(args, "title_mode", None):
         kw["job_title_mode"] = args.title_mode
